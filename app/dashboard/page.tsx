@@ -1,8 +1,20 @@
 import { DashboardGrid } from '@/components/dashboard-components';
 import { LogoutButton } from '@/components/logout-button';
+import { MetricChip, PanelEyebrow, PremiumPanel } from '@/components/premium-panel';
+import { OceanCanvas } from '@/components/scene/ocean-canvas';
 import { createClient } from '@/lib/supabase/server';
+import {
+  ArrowRight,
+  Compass,
+  FileText,
+  Radar,
+  Shell,
+  Sparkles,
+  Waves,
+} from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+
 import { getPagedOpportunities } from './actions';
 
 export default async function DashboardPage({
@@ -30,110 +42,275 @@ export default async function DashboardPage({
     .single();
 
   const pagedOpportunities = await getPagedOpportunities(page);
+  const realItems = Array.isArray(pagedOpportunities) ? pagedOpportunities : [];
 
-  const dummyItems = [
+  const fallbackItems = [
     {
       id: '1',
-      title: 'Opportunity 1',
-      description: 'Description for opportunity 1',
+      title: 'NOAA Ocean Exploration Fellowship',
+      description:
+        'Field-facing research support with strong exposure to marine systems, science communication, and expedition logistics.',
     },
     {
       id: '2',
-      title: 'Opportunity 2',
-      description: 'Description for opportunity 2',
+      title: 'Blue Economy Innovation Internship',
+      description:
+        'Applied pathway for candidates who blend scientific literacy with systems thinking and operational curiosity.',
     },
     {
       id: '3',
-      title: 'Opportunity 3',
-      description: 'Description for opportunity 3',
+      title: 'Coastal Resilience Research Placement',
+      description:
+        'A strong fit for students whose profile combines environmental analysis, public impact, and evidence-driven writing.',
     },
   ];
 
+  const items = realItems.length > 0 ? realItems : fallbackItems;
+  const profileName =
+    profileData?.full_name || profileData?.name || user.email || 'Explorer';
+  const profileFocus =
+    profileData?.field ||
+    profileData?.major ||
+    'Marine science, ocean systems, and applied research';
+  const profileLevel =
+    profileData?.level || profileData?.education_level || 'Student / early-career';
+  const profileLocation = profileData?.location || 'Location not set';
+
   return (
-    <div className='min-h-screen w-full bg-gradient-to-b from-slate-950 via-blue-950 to-slate-900 text-white flex flex-col items-center'>
-      {/* ambient glow */}
-      <div className='absolute w-[500px] h-[500px] bg-blue-500/20 blur-[140px] rounded-full -z-10 top-40 left-1/2 -translate-x-1/2' />
+    <main className='site-stage text-white'>
+      <OceanCanvas variant='dashboard' />
 
-      {/* NAV */}
-      <nav className='w-full border-b border-white/10 backdrop-blur bg-white/5'>
-        <div className='max-w-6xl mx-auto flex items-center justify-between p-5'>
-          <div>
-            <h1 className='text-xl font-semibold tracking-wide'>
-              🌊 Mission Control
-            </h1>
-            <p className='text-xs text-blue-100/60'>
-              Ocean Opportunity Strategist Dashboard
-            </p>
-          </div>
+      <div className='site-shell flex min-h-screen flex-col'>
+        <nav className='site-nav'>
+          <div className='mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 md:px-8'>
+            <div className='flex items-center gap-3'>
+              <div className='hero-glow-ring flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-200/18 bg-cyan-300/10'>
+                <Waves className='h-5 w-5 text-cyan-100' />
+              </div>
+              <div>
+                <div className='text-xs uppercase tracking-[0.32em] text-cyan-100/48'>
+                  Mission control
+                </div>
+                <h1 className='mt-1 text-xl font-semibold text-white md:text-2xl'>
+                  DeepScholar command deck
+                </h1>
+              </div>
+            </div>
 
-          <div className='flex items-center gap-4'>
-            <Link
-              href='/profile'
-              className='text-sm text-blue-200 hover:text-white transition'
-            >
-              Profile
-            </Link>
-            <LogoutButton />
-          </div>
-        </div>
-      </nav>
-
-      {/* CONTENT */}
-      <div className='w-full max-w-6xl px-5 py-10 flex flex-col gap-10'>
-        {/* WELCOME / STATUS */}
-        <section className='grid md:grid-cols-3 gap-6'>
-          <div className='md:col-span-2 p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur'>
-            <h2 className='text-2xl font-bold'>Welcome back, explorer 🌊</h2>
-
-            <p className='text-blue-100/70 mt-2'>
-              Here are your best ocean-related opportunities, ranked by fit,
-              effort, and urgency.
-            </p>
-
-            <div className='mt-4 text-sm text-blue-200/60'>
-              Status: Ready to explore new opportunities
+            <div className='flex items-center gap-3'>
+              <Link
+                href='/profile'
+                className='rounded-full border border-white/12 bg-white/[0.04] px-4 py-2 text-sm text-white/84 backdrop-blur-xl transition hover:border-cyan-200/25 hover:bg-white/[0.07]'
+              >
+                Profile
+              </Link>
+              <LogoutButton />
             </div>
           </div>
+        </nav>
 
-          <div className='p-6 rounded-2xl border border-white/10 bg-gradient-to-br from-blue-500/10 to-cyan-400/10 backdrop-blur'>
-            <h3 className='font-semibold'>Your Profile</h3>
+        <div className='mx-auto flex w-full max-w-7xl flex-1 flex-col gap-8 px-5 py-8 md:px-8 md:py-10'>
+          <section className='grid gap-6 xl:grid-cols-[1.15fr_0.85fr]'>
+            <div className='space-y-6'>
+              <div className='editorial-block rounded-[2.2rem] p-6 md:p-8'>
+                <PanelEyebrow>Live command environment</PanelEyebrow>
+                <h2 className='ocean-title mt-6 text-4xl font-semibold md:text-5xl xl:text-[4.5rem]'>
+                  Opportunity radar, fit readouts, and application direction in one field.
+                </h2>
+                <p className='ocean-copy mt-5 max-w-3xl text-base leading-8 md:text-lg'>
+                  Mission control is designed to feel calm under pressure. It
+                  keeps your profile, ranked opportunities, fit signal, and
+                  draft direction in a single high-end surface rather than
+                  scattering them across generic utility views.
+                </p>
 
-            <p className='text-sm text-blue-100/60 mt-2'>
-              {profileData?.full_name || 'Incomplete profile'}
-            </p>
+                <div className='mt-8 flex flex-wrap gap-3'>
+                  <MetricChip label='Profile' value={profileLevel} />
+                  <MetricChip label='Focus' value={profileFocus} />
+                  <MetricChip label='Page' value={`0${page}`} />
+                </div>
+              </div>
 
-            <Link
-              href='/profile'
-              className='inline-block mt-4 text-sm text-cyan-300 hover:text-cyan-200'
-            >
-              Edit Profile →
-            </Link>
-          </div>
-        </section>
+              <PremiumPanel tone='bright'>
+                <div className='grid gap-4 sm:grid-cols-3'>
+                  <div className='field-surface rounded-[1.4rem] p-4'>
+                    <div className='text-[0.65rem] uppercase tracking-[0.26em] text-cyan-100/45'>
+                      Parsed profile
+                    </div>
+                    <p className='mt-3 text-sm leading-7 text-white/78'>
+                      The intake flow becomes a usable profile foundation instead
+                      of staying buried in raw documents and guesswork.
+                    </p>
+                  </div>
+                  <div className='field-surface rounded-[1.4rem] p-4'>
+                    <div className='text-[0.65rem] uppercase tracking-[0.26em] text-cyan-100/45'>
+                      Opportunity fit
+                    </div>
+                    <p className='mt-3 text-sm leading-7 text-white/78'>
+                      Ranking and fit interpretation focus attention where your
+                      effort is most likely to compound.
+                    </p>
+                  </div>
+                  <div className='field-surface rounded-[1.4rem] p-4'>
+                    <div className='text-[0.65rem] uppercase tracking-[0.26em] text-cyan-100/45'>
+                      Draft vector
+                    </div>
+                    <p className='mt-3 text-sm leading-7 text-white/78'>
+                      Writing support stays close to signal instead of becoming a
+                      detached blank-page exercise.
+                    </p>
+                  </div>
+                </div>
+              </PremiumPanel>
+            </div>
 
-        {/* OPPORTUNITIES HEADER */}
-        <section className='flex items-center justify-between'>
-          <h2 className='text-xl font-semibold'>Ranked Opportunities</h2>
+            <div className='grid gap-6'>
+              <PremiumPanel>
+                <div className='flex items-start justify-between gap-4'>
+                  <div>
+                    <PanelEyebrow>Current profile surface</PanelEyebrow>
+                    <h3 className='mt-4 text-2xl font-semibold text-white'>
+                      {profileName}
+                    </h3>
+                  </div>
+                  <div className='hero-glow-ring flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-200/15 bg-cyan-300/10'>
+                    <Shell className='h-5 w-5 text-cyan-100' />
+                  </div>
+                </div>
 
-          <div className='text-sm text-blue-200/60'>Page {page}</div>
-        </section>
+                <div className='mt-6 grid gap-4 sm:grid-cols-2'>
+                  <div>
+                    <div className='text-[0.65rem] uppercase tracking-[0.24em] text-cyan-100/42'>
+                      Focus area
+                    </div>
+                    <p className='mt-2 text-sm leading-7 text-white/78'>
+                      {profileFocus}
+                    </p>
+                  </div>
+                  <div>
+                    <div className='text-[0.65rem] uppercase tracking-[0.24em] text-cyan-100/42'>
+                      Stage
+                    </div>
+                    <p className='mt-2 text-sm leading-7 text-white/78'>
+                      {profileLevel}
+                    </p>
+                  </div>
+                  <div className='sm:col-span-2'>
+                    <div className='text-[0.65rem] uppercase tracking-[0.24em] text-cyan-100/42'>
+                      Location
+                    </div>
+                    <p className='mt-2 text-sm leading-7 text-white/78'>
+                      {profileLocation}
+                    </p>
+                  </div>
+                </div>
 
-        {/* GRID */}
-        <section>
-          <DashboardGrid items={dummyItems} />
-        </section>
+                <Link
+                  href='/profile'
+                  className='mt-6 inline-flex items-center gap-2 text-sm text-cyan-100/76 transition hover:text-cyan-100'
+                >
+                  Review profile surface
+                  <ArrowRight className='h-4 w-4' />
+                </Link>
+              </PremiumPanel>
 
-        {/* OPTIONAL INSIGHT PANEL */}
-        <section className='p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur'>
-          <h3 className='font-semibold text-lg'>AI Insight</h3>
+              <PremiumPanel tone='shadow'>
+                <PanelEyebrow>Selected target</PanelEyebrow>
+                <h3 className='mt-4 text-2xl font-semibold text-white'>
+                  {items[0]?.title || 'Opportunity detail surface'}
+                </h3>
+                <p className='mt-3 text-sm leading-7 text-white/74'>
+                  {items[0]?.description ||
+                    'Use this panel to hold the current target in view while the rest of mission control interprets fit and narrative direction.'}
+                </p>
+                <div className='mt-5 inline-flex items-center gap-2 rounded-full border border-cyan-200/14 bg-cyan-300/8 px-3 py-1 text-[0.68rem] uppercase tracking-[0.24em] text-cyan-100/60'>
+                  <Compass className='h-4 w-4' />
+                  Priority target aligned
+                </div>
+              </PremiumPanel>
+            </div>
+          </section>
 
-          <p className='text-blue-100/70 mt-2'>
-            Focus on opportunities that combine research + field experience.
-            Your profile aligns strongly with marine conservation and coastal
-            systems roles.
-          </p>
-        </section>
+          <section className='grid gap-6 lg:grid-cols-[1.12fr_0.88fr]'>
+            <PremiumPanel tone='bright'>
+              <div className='flex items-center justify-between gap-4'>
+                <div>
+                  <PanelEyebrow>Matched opportunities</PanelEyebrow>
+                  <h2 className='mt-4 text-2xl font-semibold text-white md:text-3xl'>
+                    Ranked ocean pathways
+                  </h2>
+                </div>
+                <div className='signal-pill inline-flex rounded-full px-4 py-2 text-sm'>
+                  Page {page}
+                </div>
+              </div>
+
+              <div className='mt-6'>
+                <DashboardGrid items={items} />
+              </div>
+            </PremiumPanel>
+
+            <div className='grid gap-6'>
+              <PremiumPanel>
+                <div className='flex items-center gap-3'>
+                  <div className='hero-glow-ring flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-200/15 bg-cyan-300/10'>
+                    <Radar className='h-5 w-5 text-cyan-100' />
+                  </div>
+                  <div>
+                    <PanelEyebrow>Fit analysis</PanelEyebrow>
+                    <h3 className='mt-2 text-xl font-semibold text-white'>
+                      Where your signal is strongest
+                    </h3>
+                  </div>
+                </div>
+                <p className='mt-5 text-sm leading-7 text-white/74'>
+                  Your profile currently reads strongest for mission-driven
+                  marine research, coastal systems work, and roles that reward
+                  evidence-heavy thinking paired with scientific communication.
+                </p>
+              </PremiumPanel>
+
+              <PremiumPanel>
+                <div className='flex items-center gap-3'>
+                  <div className='hero-glow-ring flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-200/15 bg-cyan-300/10'>
+                    <Sparkles className='h-5 w-5 text-cyan-100' />
+                  </div>
+                  <div>
+                    <PanelEyebrow>Positioning system</PanelEyebrow>
+                    <h3 className='mt-2 text-xl font-semibold text-white'>
+                      Narrative angle to develop
+                    </h3>
+                  </div>
+                </div>
+                <p className='mt-5 text-sm leading-7 text-white/74'>
+                  Lead with systems curiosity, environmental responsibility, and
+                  concrete initiative. The strongest story connects technical
+                  discipline with real ocean impact.
+                </p>
+              </PremiumPanel>
+
+              <PremiumPanel>
+                <div className='flex items-center gap-3'>
+                  <div className='hero-glow-ring flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-200/15 bg-cyan-300/10'>
+                    <FileText className='h-5 w-5 text-cyan-100' />
+                  </div>
+                  <div>
+                    <PanelEyebrow>Draft output</PanelEyebrow>
+                    <h3 className='mt-2 text-xl font-semibold text-white'>
+                      Writing surface ready
+                    </h3>
+                  </div>
+                </div>
+                <p className='mt-5 text-sm leading-7 text-white/74'>
+                  Draft work should begin from the signal already visible here,
+                  not from a blank page. This keeps the writing phase aligned
+                  with fit, evidence, and opportunity shape.
+                </p>
+              </PremiumPanel>
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
