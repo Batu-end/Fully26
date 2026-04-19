@@ -1,3 +1,4 @@
+# PURPOSE: Test script to mathematically verify our auth functions work correctly.
 from fastapi.testclient import TestClient
 from main import app
 from jose import jwt

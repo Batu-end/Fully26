@@ -1,3 +1,4 @@
+# PURPOSE: Handles Supabase JWT token verification for securing API routes.
 import os
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials

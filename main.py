@@ -1,3 +1,4 @@
+# PURPOSE: Main FastAPI application entry point, defining all API endpoints.
 from fastapi import FastAPI, Depends
 from auth import verify_supabase_token
 
