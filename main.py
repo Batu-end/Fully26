@@ -64,3 +64,25 @@ def get_opportunities(payload=Depends(verify_supabase_token)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ---------------------------------------------------------
+# TRACKER / MATCH ENDPOINTS
+# ---------------------------------------------------------
+@app.get("/api/students/{student_id}/matches", response_model=list[schemas.OpportunityMatchResponse])
+def get_student_matches(student_id: str, payload=Depends(verify_supabase_token)):
+    # 1. Security Check: Ensure the user is only requesting THEIR OWN dashboard, not someone else's.
+    if payload.get("sub") != student_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You can only view your own dashboard.")
+        
+    try:
+        # 2. Fetch matches. We use Supabase relational querying (`*, opportunity:opportunities(*)`)
+        # This grabs the match AND pulling in the full details of the linked Opportunity simultaneously!
+        response = supabase.table("opportunity_matches") \
+            .select("*, opportunity:opportunities(*)") \
+            .eq("student_id", student_id) \
+            .execute()
+            
+        return response.data
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
