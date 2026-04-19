@@ -1,16 +1,23 @@
+import json
+from pathlib import Path
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
-from ai_ocean_opportunity_service import (
-    analyze_fit,
-    extract_opportunity,
-    generate_draft,
-    generate_positioning,
-    parse_profile,
+import ai_ocean_opportunity_service as ai_service
+from ai_ocean_opportunity_openai import OceanOpportunityOpenAIError
+from ai_ocean_opportunity_schemas import (
+    Draft,
+    FitAnalysis,
+    OpportunityIntelligence,
+    Positioning,
+    StudentProfile,
 )
 from auth import verify_supabase_token
 from main import app
 
 
+FIXTURES_DIR = Path(__file__).parent / "data" / "ai_ocean_opportunity"
 client = TestClient(app)
 
 
@@ -18,250 +25,311 @@ def _override_user():
     return {"sub": "test-user", "role": "authenticated"}
 
 
-def test_parse_profile_service_returns_canonical_profile():
-    profile = parse_profile(
-        (
-            "Avery Chen\n"
-            "Ocean State University\n"
-            "B.S. in Marine Biology, GPA: 3.8, Expected Graduation 2027\n"
-            "Research Assistant at Coastal Lab\n"
-            "President, Marine Conservation Club\n"
-            "Volunteer for community beach cleanup programs\n"
-            "Skills: Python, data analysis, GIS\n"
-            "Interested in ocean conservation and climate resilience."
+def _load_text_fixture(filename: str) -> str:
+    return (FIXTURES_DIR / filename).read_text(encoding="utf-8")
+
+
+def _load_json_fixture(filename: str) -> dict:
+    return json.loads((FIXTURES_DIR / filename).read_text(encoding="utf-8"))
+
+
+def _model_to_dict(model):
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
+def _force_ai_fallback():
+    return patch(
+        "ai_ocean_opportunity_service.call_openai_json",
+        side_effect=OceanOpportunityOpenAIError("forced test fallback"),
+    )
+
+
+def _sample_resume_text() -> str:
+    return _load_text_fixture("sample_resume.txt")
+
+
+def _sample_opportunity_text() -> str:
+    return _load_text_fixture("sample_opportunity.txt")
+
+
+def _fallback_profile() -> StudentProfile:
+    with _force_ai_fallback():
+        return ai_service.parse_profile(_sample_resume_text())
+
+
+def _fallback_opportunity() -> OpportunityIntelligence:
+    with _force_ai_fallback():
+        return ai_service.extract_opportunity(_sample_opportunity_text())
+
+
+def test_fixture_examples_are_schema_valid():
+    expected_profile = StudentProfile(**_load_json_fixture("expected_profile.json"))
+    expected_opportunity = OpportunityIntelligence(
+        **_load_json_fixture("expected_opportunity.json")
+    )
+
+    assert expected_profile.name == "Avery Chen"
+    assert expected_profile.evidence_bank
+    assert expected_opportunity.title == "Blue Ocean Fellowship"
+    assert expected_opportunity.hard_requirements
+
+
+def test_parse_profile_fallback_returns_canonical_profile():
+    expected_profile = StudentProfile(**_load_json_fixture("expected_profile.json"))
+
+    with _force_ai_fallback():
+        profile = ai_service.parse_profile(
+            _sample_resume_text(),
+            form_data={
+                "financial_need_flag": True,
+                "career_goals": ["Ocean policy research"],
+            },
         )
-    )
 
-    assert profile.name == "Avery Chen"
-    assert profile.school == "Ocean State University"
-    assert profile.major == "Marine Biology"
-    assert profile.gpa == 3.8
-    assert profile.graduation_year == "2027"
-    assert "Python" in profile.skills
-    assert "Ocean" in profile.interests
-    assert "Leadership" in profile.core_story_themes
-    assert profile.evidence_bank[0].source_type == "self-report"
-
-
-def test_parse_profile_prefers_explicit_form_data():
-    profile = parse_profile(
-        "Jordan Lee\nCoastal University\nB.S. in Environmental Science",
-        form_data={
-            "name": "Jordan Rivera",
-            "school": "Pacific Tech",
-            "major": "Ocean Engineering",
-            "financial_need_flag": True,
-            "skills": ["Writing", "R"],
-            "career_goals": ["Ocean policy"],
-        },
-    )
-
-    assert profile.name == "Jordan Rivera"
-    assert profile.school == "Pacific Tech"
-    assert profile.major == "Ocean Engineering"
+    assert isinstance(profile, StudentProfile)
+    assert profile.name == expected_profile.name
+    assert profile.school == expected_profile.school
+    assert profile.major == expected_profile.major
+    assert profile.gpa == expected_profile.gpa
+    assert profile.student_type == expected_profile.student_type
     assert profile.financial_need_flag is True
-    assert profile.skills[:2] == ["Writing", "R"]
-    assert profile.career_goals[0] == "Ocean policy"
+    assert profile.evidence_bank
+    assert profile.core_story_themes
+    assert profile.career_goals[0] == "Ocean policy research"
 
 
-def test_extract_opportunity_service_returns_canonical_opportunity():
-    opportunity = extract_opportunity(
-        (
-            "Blue Ocean Fellowship\n"
-            "Hosted by Ocean Lab.\n"
-            "Climate fellowship focused on coastal data and marine resilience.\n"
-            "Applicants must be enrolled students and submit a resume and essay.\n"
-            "Deadline: June 15, 2026.\n"
-            "Location: Remote.\n"
-            "Stipend: $5,000."
-        )
+def test_extract_opportunity_fallback_returns_canonical_opportunity():
+    expected_opportunity = OpportunityIntelligence(
+        **_load_json_fixture("expected_opportunity.json")
     )
 
-    assert opportunity.title == "Blue Ocean Fellowship"
-    assert opportunity.opportunity_type == "fellowship"
-    assert opportunity.amount_or_stipend == "$5,000"
-    assert opportunity.deadline == "June 15, 2026"
-    assert opportunity.location == "Remote"
-    assert opportunity.required_materials == ["Resume", "Essay"]
+    with _force_ai_fallback():
+        opportunity = ai_service.extract_opportunity(_sample_opportunity_text())
+
+    assert isinstance(opportunity, OpportunityIntelligence)
+    assert opportunity.title == expected_opportunity.title
+    assert opportunity.provider == expected_opportunity.provider
+    assert opportunity.opportunity_type == expected_opportunity.opportunity_type
+    assert opportunity.deadline == expected_opportunity.deadline
+    assert opportunity.location == expected_opportunity.location
+    assert opportunity.required_materials
     assert opportunity.estimated_effort.effort_level in {"medium", "high"}
 
 
-def test_analyze_fit_returns_early_on_hard_filter_failure():
-    profile = parse_profile(
-        "Avery Chen\nOcean State University\nB.S. in Marine Biology, GPA: 3.2, Expected Graduation 2027"
-    )
-    opportunity = extract_opportunity(
-        (
-            "Blue Ocean Fellowship\n"
-            "Applicants must have GPA 3.7 or higher.\n"
-            "Applicants must be enrolled students.\n"
-            "Deadline: June 15, 2026."
-        )
-    )
-    analysis = analyze_fit(profile, opportunity)
+def test_analyze_fit_hard_filter_failure_is_honest_and_canonical():
+    profile = _fallback_profile()
+    opportunity = OpportunityIntelligence(**_load_json_fixture("expected_opportunity.json"))
+    opportunity.hard_requirements[0].requirement = "Applicants must have GPA 3.9 or higher."
+    opportunity.hard_requirements[0].strictness = "required"
 
+    analysis = ai_service.analyze_fit(profile, opportunity)
+
+    assert isinstance(analysis, FitAnalysis)
     assert analysis.eligible is False
     assert analysis.hard_filter_failures
     assert "gpa" in analysis.hard_filter_failures[0].lower()
+    assert analysis.fit_signals == []
+    assert analysis.fit_gaps == []
     assert analysis.semantic_fit_score == 0.0
     assert analysis.narrative_alignment_score == 0.0
 
-    positioning = generate_positioning(profile, opportunity, analysis)
-    assert positioning.best_angle == "Address the eligibility limitation directly"
-    assert "eligibility" in positioning.why_this_angle.lower()
-    assert positioning.missing_story_piece == "Confirmed eligibility or an alternate qualifying pathway."
 
+def test_analyze_fit_fallback_returns_canonical_soft_analysis():
+    profile = _fallback_profile()
+    opportunity = _fallback_opportunity()
 
-def test_analyze_fit_returns_fallback_soft_analysis():
-    profile = parse_profile(
-        (
-            "Avery Chen\n"
-            "Ocean State University\n"
-            "B.S. in Marine Biology, GPA: 3.8, Expected Graduation 2027\n"
-            "Research Assistant at Coastal Lab\n"
-            "President, Marine Conservation Club\n"
-            "Volunteer for community beach cleanup programs\n"
-            "Skills: Python, data analysis, GIS\n"
-            "Interested in ocean conservation and climate resilience."
-        )
-    )
-    opportunity = extract_opportunity(
-        (
-            "Blue Ocean Fellowship\n"
-            "Hosted by Ocean Lab.\n"
-            "Climate fellowship focused on coastal data and marine resilience.\n"
-            "Applicants must be enrolled students and submit a resume and essay.\n"
-            "Deadline: June 15, 2026.\n"
-            "Location: Remote.\n"
-            "Stipend: $5,000."
-        )
-    )
-    analysis = analyze_fit(profile, opportunity)
-    positioning = generate_positioning(profile, opportunity, analysis)
-    draft = generate_draft(
-        profile,
-        opportunity,
-        positioning,
-        application_prompt="Write a short application response.",
-    )
+    with _force_ai_fallback():
+        analysis = ai_service.analyze_fit(profile, opportunity)
 
+    assert isinstance(analysis, FitAnalysis)
     assert analysis.eligible is True
     assert analysis.hard_filter_failures == []
-    assert analysis.semantic_fit_score > 0.0
-    assert analysis.narrative_alignment_score > 0.0
     assert analysis.fit_signals
-    assert positioning.best_angle != "Mission-aligned ocean opportunity candidate" or positioning.evidence_to_use
+    assert 0.0 <= analysis.semantic_fit_score <= 1.0
+    assert 0.0 <= analysis.narrative_alignment_score <= 1.0
+    assert analysis.reasoning
+
+
+def test_generate_positioning_fallback_returns_canonical_positioning():
+    profile = _fallback_profile()
+    opportunity = _fallback_opportunity()
+    with _force_ai_fallback():
+        analysis = ai_service.analyze_fit(profile, opportunity)
+        positioning = ai_service.generate_positioning(profile, opportunity, analysis)
+
+    assert isinstance(positioning, Positioning)
+    assert positioning.best_angle
+    assert positioning.why_this_angle
     assert positioning.evidence_to_use
     assert positioning.things_to_avoid
     assert positioning.missing_story_piece
+
+
+def test_generate_positioning_is_honest_when_ineligible():
+    profile = _fallback_profile()
+    opportunity = _fallback_opportunity()
+    ineligible_analysis = FitAnalysis(
+        eligible=False,
+        hard_filter_failures=["Student GPA 3.80 is below the required 3.9."],
+        fit_signals=[],
+        fit_gaps=[],
+        semantic_fit_score=0.0,
+        narrative_alignment_score=0.0,
+        reasoning="Hard filter failure detected.",
+    )
+
+    positioning = ai_service.generate_positioning(
+        profile, opportunity, ineligible_analysis
+    )
+
+    assert positioning.best_angle == "Address the eligibility limitation directly"
+    assert "eligibility" in positioning.why_this_angle.lower()
+    assert positioning.missing_story_piece
+
+
+def test_generate_draft_fallback_returns_editable_canonical_draft():
+    profile = _fallback_profile()
+    opportunity = _fallback_opportunity()
+    with _force_ai_fallback():
+        analysis = ai_service.analyze_fit(profile, opportunity)
+        positioning = ai_service.generate_positioning(profile, opportunity, analysis)
+        draft = ai_service.generate_draft(
+            profile,
+            opportunity,
+            positioning,
+            essay_prompt="Describe why you want to contribute to ocean resilience research.",
+            application_prompt="Fallback prompt should not be selected when essay prompt exists.",
+        )
+
+    assert isinstance(draft, Draft)
     assert draft.draft_answer
+    assert "blue ocean fellowship" in draft.draft_answer.lower()
     assert draft.draft_outline
     assert draft.user_edit_required
-    assert draft.autofilled_fields[0].field == "opportunity_title"
+    autofilled = {field.field: field.value for field in draft.autofilled_fields}
+    assert autofilled["opportunity_title"] == "Blue Ocean Fellowship"
+    assert autofilled["selected_prompt"].startswith("Describe why you want")
 
 
-def test_parse_profile_route_returns_json_payload():
+def test_parse_profile_route_returns_canonical_response_keys():
     app.dependency_overrides[verify_supabase_token] = _override_user
     try:
-        response = client.post(
-            "/api/ai/parse-profile",
-            json={
-                "resume_text": (
-                    "Taylor Brooks\n"
-                    "Marine Tech University\n"
-                    "B.S. in Ocean Engineering, GPA: 3.6, Expected Graduation 2028\n"
-                    "Robotics Club Lead\n"
-                    "Interested in blue economy internships."
-                ),
-                "form_data": {"financial_need_flag": True},
-            },
-        )
+        with _force_ai_fallback():
+            response = client.post(
+                "/api/ai/parse-profile",
+                json={
+                    "resume_text": _sample_resume_text(),
+                    "form_data": {"financial_need_flag": True},
+                },
+            )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["student_profile"]["name"] == "Taylor Brooks"
-    assert payload["student_profile"]["school"] == "Marine Tech University"
+    assert "student_profile" in payload
+    assert "profile" not in payload
+    assert payload["student_profile"]["name"] == "Avery Chen"
     assert payload["student_profile"]["financial_need_flag"] is True
-    assert payload["student_profile"]["evidence_bank"][0]["source_type"] == "self-report"
 
 
-def test_generate_draft_route_returns_placeholder_draft():
+def test_extract_opportunity_route_returns_canonical_response_keys():
     app.dependency_overrides[verify_supabase_token] = _override_user
     try:
-        response = client.post(
-            "/api/ai/generate-draft",
-            json={
-                "student_profile": {
-                    "name": "Student Example",
-                    "school": "Ocean State University",
-                    "major": "Marine Policy",
-                    "gpa": 3.7,
-                    "student_type": "undergraduate",
-                    "graduation_year": "2027",
-                    "activities": ["Ocean innovation club"],
-                    "work_experience": ["Lab assistant"],
-                    "leadership_signals": ["Club organizer"],
-                    "awards": ["Research travel grant"],
-                    "skills": ["research"],
-                    "interests": ["ocean"],
-                    "financial_need_flag": False,
-                    "identity_flags_opt_in": [],
-                    "core_story_themes": ["Blue economy curiosity"],
-                    "evidence_bank": [
-                        {
-                            "label": "Club project",
-                            "detail": "Led a coastal cleanup project.",
-                            "source_type": "project",
-                        }
-                    ],
-                    "career_goals": ["strategy"],
-                },
-                "opportunity": {
-                    "title": "Blue Economy Fellowship",
-                    "provider": "Ocean Lab",
-                    "opportunity_type": "fellowship",
-                    "amount_or_stipend": "$5,000 stipend",
-                    "deadline": "2026-06-01",
-                    "location": "Remote",
-                    "raw_theme": "A program for founders and researchers.",
-                    "hard_requirements": [
-                        {
-                            "requirement": "Current student status",
-                            "category": "academic",
-                            "strictness": "required",
-                            "notes": "Must be enrolled.",
-                        }
-                    ],
-                    "soft_preferences": ["Innovation interest"],
-                    "essay_themes": ["Impact"],
-                    "required_materials": ["Resume"],
-                    "estimated_effort": {
-                        "time_hours_low": 2.0,
-                        "time_hours_high": 5.0,
-                        "writing_load": "short-response",
-                        "effort_level": "medium",
-                    },
-                    "red_flags": [],
-                    "opportunity_cluster": "blue-economy",
-                },
-                "positioning": {
-                    "best_angle": "Mission-aligned ocean builder",
-                    "why_this_angle": "Connect mission to fellowship work.",
-                    "evidence_to_use": ["Cleanup project leadership"],
-                    "things_to_avoid": ["Generic claims"],
-                    "missing_story_piece": "A quantified impact example",
-                },
-                "application_prompt": "Why are you a strong fit for this fellowship?",
-            },
-        )
+        with _force_ai_fallback():
+            response = client.post(
+                "/api/ai/extract-opportunity",
+                json={"raw_text": _sample_opportunity_text()},
+            )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
     payload = response.json()
-    assert "blue economy fellowship" in payload["draft"]["draft_answer"].lower()
-    assert payload["draft"]["autofilled_fields"][0]["field"] == "opportunity_title"
+    assert list(payload.keys()) == ["opportunity"]
+    assert payload["opportunity"]["title"] == "Blue Ocean Fellowship"
+
+
+def test_analyze_fit_route_returns_canonical_response_keys():
+    profile = _fallback_profile()
+    opportunity = _fallback_opportunity()
+
+    app.dependency_overrides[verify_supabase_token] = _override_user
+    try:
+        with _force_ai_fallback():
+            response = client.post(
+                "/api/ai/analyze-fit",
+                json={
+                    "student_profile": _model_to_dict(profile),
+                    "opportunity": _model_to_dict(opportunity),
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert list(payload.keys()) == ["fit_analysis"]
+    assert "analysis" not in payload
+    assert "semantic_fit_score" in payload["fit_analysis"]
+
+
+def test_generate_positioning_route_returns_canonical_response_keys():
+    profile = _fallback_profile()
+    opportunity = _fallback_opportunity()
+    with _force_ai_fallback():
+        analysis = ai_service.analyze_fit(profile, opportunity)
+
+    app.dependency_overrides[verify_supabase_token] = _override_user
+    try:
+        with _force_ai_fallback():
+            response = client.post(
+                "/api/ai/generate-positioning",
+                json={
+                    "student_profile": _model_to_dict(profile),
+                    "opportunity": _model_to_dict(opportunity),
+                    "fit_analysis": _model_to_dict(analysis),
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert list(payload.keys()) == ["positioning"]
+    assert "best_angle" in payload["positioning"]
+    assert "missing_story_piece" in payload["positioning"]
+
+
+def test_generate_draft_route_returns_canonical_response_keys():
+    profile = _fallback_profile()
+    opportunity = _fallback_opportunity()
+    with _force_ai_fallback():
+        analysis = ai_service.analyze_fit(profile, opportunity)
+        positioning = ai_service.generate_positioning(profile, opportunity, analysis)
+
+    app.dependency_overrides[verify_supabase_token] = _override_user
+    try:
+        with _force_ai_fallback():
+            response = client.post(
+                "/api/ai/generate-draft",
+                json={
+                    "student_profile": _model_to_dict(profile),
+                    "opportunity": _model_to_dict(opportunity),
+                    "positioning": _model_to_dict(positioning),
+                    "essay_prompt": "Describe why you want to contribute to ocean resilience research.",
+                    "application_prompt": "This should be ignored when essay_prompt exists.",
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert list(payload.keys()) == ["draft"]
+    assert "draft_answer" in payload["draft"]
+    assert payload["draft"]["autofilled_fields"]
     assert payload["draft"]["draft_outline"]
     assert payload["draft"]["user_edit_required"]

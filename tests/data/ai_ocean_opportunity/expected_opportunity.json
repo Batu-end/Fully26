@@ -1,0 +1,37 @@
+{
+  "title": "Blue Ocean Fellowship",
+  "provider": "Ocean Lab",
+  "opportunity_type": "fellowship",
+  "amount_or_stipend": "$5,000",
+  "deadline": "June 15, 2026",
+  "location": "Remote",
+  "raw_theme": "Marine science and ocean systems",
+  "hard_requirements": [
+    {
+      "requirement": "Applicants must be enrolled students and submit a resume and essay.",
+      "category": "academic",
+      "strictness": "required",
+      "notes": "Fallback extraction from raw opportunity text."
+    }
+  ],
+  "soft_preferences": [
+    "Preferred candidates have research experience and strong communication skills.",
+    "Interest in ocean or marine issues.",
+    "Interest in climate or coastal resilience."
+  ],
+  "essay_themes": [
+    "Research interest"
+  ],
+  "required_materials": [
+    "Resume",
+    "Essay"
+  ],
+  "estimated_effort": {
+    "time_hours_low": 3.0,
+    "time_hours_high": 6.0,
+    "writing_load": "short-response",
+    "effort_level": "medium"
+  },
+  "red_flags": [],
+  "opportunity_cluster": "marine-research"
+}
