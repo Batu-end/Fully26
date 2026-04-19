@@ -103,26 +103,44 @@ def extract_opportunity(
 def analyze_fit(
     student_profile: StudentProfile, opportunity: OpportunityIntelligence
 ) -> FitAnalysis:
-    """Compare a student profile to an opportunity with canonical fit fields.
+    """Compare a canonical student profile and opportunity for fit."""
 
-    TODO: Add model-backed reasoning that highlights strengths, gaps, and
-    confidence signals using the parsed profile and opportunity context.
-    """
+    hard_filter_failures = _collect_hard_filter_failures(student_profile, opportunity)
+    if hard_filter_failures:
+        return FitAnalysis(
+            eligible=False,
+            hard_filter_failures=hard_filter_failures,
+            fit_signals=[],
+            fit_gaps=[],
+            semantic_fit_score=0.0,
+            narrative_alignment_score=0.0,
+            reasoning=(
+                f"'{student_profile.name}' does not clearly meet one or more hard "
+                f"requirements for '{opportunity.title}'."
+            ),
+        )
 
-    return FitAnalysis(
-        eligible=None,
-        hard_filter_failures=[],
-        fit_signals=[
-            "Student profile and opportunity are available for future analysis."
-        ],
-        fit_gaps=["Detailed fit scoring is not implemented yet."],
-        semantic_fit_score=0.0,
-        narrative_alignment_score=0.0,
-        reasoning=(
-            f"Prepared to compare '{student_profile.name or 'student profile'}' with "
-            f"'{opportunity.title or 'opportunity'}'."
-        ),
-    )
+    try:
+        model_fit = call_openai_json(
+            system_prompt=_build_fit_analysis_system_prompt(),
+            user_prompt=_build_fit_analysis_user_prompt(student_profile, opportunity),
+            output_model=FitAnalysis,
+        )
+        return FitAnalysis(
+            eligible=True,
+            hard_filter_failures=[],
+            fit_signals=_dedupe_keep_order(model_fit.fit_signals)[:5],
+            fit_gaps=_dedupe_keep_order(model_fit.fit_gaps)[:5],
+            semantic_fit_score=max(0.0, min(1.0, model_fit.semantic_fit_score)),
+            narrative_alignment_score=max(
+                0.0, min(1.0, model_fit.narrative_alignment_score)
+            ),
+            reasoning=model_fit.reasoning,
+        )
+    except OceanOpportunityOpenAIError:
+        return _build_fit_analysis_fallback(student_profile, opportunity)
+    except Exception:
+        return _build_fit_analysis_fallback(student_profile, opportunity)
 
 
 def generate_positioning(
@@ -197,6 +215,239 @@ def generate_draft(
             "Validate factual claims against the student's real evidence.",
             "Tailor tone and specificity to the exact application prompt.",
         ],
+    )
+
+
+def _build_fit_analysis_system_prompt() -> str:
+    return (
+        "You analyze fit between a canonical StudentProfile and canonical "
+        "OpportunityIntelligence object for an AI Ocean Opportunity Strategist. "
+        "Return only the canonical FitAnalysis schema.\n\n"
+        "Do not re-check hard filters beyond the structured inputs provided; those "
+        "are already handled in code. Focus only on fit_signals, fit_gaps, "
+        "semantic_fit_score, narrative_alignment_score, and concise reasoning.\n"
+        "Use scores from 0.0 to 1.0. Be conservative, grounded in the provided "
+        "fields only, and do not predict selection odds or chances of winning."
+    )
+
+
+def _build_fit_analysis_user_prompt(
+    student_profile: StudentProfile, opportunity: OpportunityIntelligence
+) -> str:
+    payload = {
+        "student_profile": _model_to_dict(student_profile),
+        "opportunity": _model_to_dict(opportunity),
+    }
+    return (
+        "Analyze fit between this canonical student profile and opportunity.\n\n"
+        f"{json.dumps(payload, indent=2, ensure_ascii=True)}"
+    )
+
+
+def _collect_hard_filter_failures(
+    student_profile: StudentProfile, opportunity: OpportunityIntelligence
+) -> list[str]:
+    failures: list[str] = []
+    for requirement in opportunity.hard_requirements:
+        if requirement.strictness != "required":
+            continue
+        failures.extend(_evaluate_required_requirement(student_profile, requirement))
+    return _dedupe_keep_order(failures)
+
+
+def _evaluate_required_requirement(
+    student_profile: StudentProfile, requirement: OpportunityRequirement
+) -> list[str]:
+    text = " ".join(
+        part for part in [requirement.requirement, requirement.notes] if part
+    ).lower()
+
+    checks = [
+        _check_required_gpa(student_profile, text),
+        _check_required_student_type(student_profile, text),
+        _check_required_major(student_profile, text),
+        _check_required_skills(student_profile, text),
+        _check_required_experience(student_profile, text),
+        _check_required_graduation_window(student_profile, text),
+        _check_required_financial_need(student_profile, text),
+    ]
+
+    return [failure for failure in checks if failure]
+
+
+def _check_required_gpa(student_profile: StudentProfile, requirement_text: str) -> str | None:
+    if "gpa" not in requirement_text:
+        return None
+
+    match = re.search(
+        r"gpa(?:\s*(?:of|>=|>|minimum|min\.?|at least))?\s*(\d\.\d{1,2})",
+        requirement_text,
+    )
+    if not match:
+        return None
+
+    required_gpa = float(match.group(1))
+    if student_profile.gpa is None:
+        return f"GPA requirement of {required_gpa:.1f} is explicit, but the student's GPA is unknown."
+    if student_profile.gpa < required_gpa:
+        return f"Student GPA {student_profile.gpa:.2f} is below the required {required_gpa:.1f}."
+    return None
+
+
+def _check_required_student_type(
+    student_profile: StudentProfile, requirement_text: str
+) -> str | None:
+    student_type = student_profile.student_type.lower()
+    if any(token in requirement_text for token in ["undergraduate", "undergrad"]):
+        if "undergraduate" not in student_type:
+            return "Opportunity requires an undergraduate student."
+    if any(token in requirement_text for token in ["graduate student", "master", "masters"]):
+        if "graduate" not in student_type and "master" not in student_type:
+            return "Opportunity requires a graduate-level student."
+    if any(token in requirement_text for token in ["phd", "doctoral", "doctorate"]):
+        if "doctoral" not in student_type and "phd" not in student_type:
+            return "Opportunity requires a doctoral-level student."
+    if "high school" in requirement_text and "high-school" not in student_type:
+        return "Opportunity requires a high-school student."
+    return None
+
+
+def _check_required_major(
+    student_profile: StudentProfile, requirement_text: str
+) -> str | None:
+    major = student_profile.major.lower()
+    if major == "tbd":
+        return None
+
+    major_buckets = {
+        "engineering": ["engineering", "mechanical", "electrical", "robotics"],
+        "marine biology": ["marine biology", "biology", "ecology", "oceanography"],
+        "computer science": ["computer science", "software", "data science"],
+        "policy": ["policy", "political science", "public policy", "government"],
+    }
+    for label, keywords in major_buckets.items():
+        if label in requirement_text:
+            if not any(keyword in major for keyword in keywords):
+                return f"Opportunity requires {label}-aligned study, which is not evident from the student's major."
+    return None
+
+
+def _check_required_skills(
+    student_profile: StudentProfile, requirement_text: str
+) -> str | None:
+    required_skills = []
+    skill_keywords = [
+        "python",
+        "gis",
+        "matlab",
+        "excel",
+        "writing",
+        "communication",
+        "research",
+        "analysis",
+    ]
+    for skill in skill_keywords:
+        if skill in requirement_text:
+            required_skills.append(skill)
+
+    if not required_skills:
+        return None
+
+    student_skill_text = " ".join(student_profile.skills).lower()
+    missing = [skill for skill in required_skills if skill not in student_skill_text]
+    if missing:
+        return f"Required skill(s) missing from the student's profile: {', '.join(missing)}."
+    return None
+
+
+def _check_required_experience(
+    student_profile: StudentProfile, requirement_text: str
+) -> str | None:
+    experience_keywords = ["research experience", "fieldwork", "internship experience"]
+    if not any(keyword in requirement_text for keyword in experience_keywords):
+        return None
+
+    combined_experience = " ".join(
+        student_profile.work_experience + student_profile.activities + student_profile.leadership_signals
+    ).lower()
+
+    if "research experience" in requirement_text and "research" not in combined_experience:
+        return "Opportunity explicitly requires research experience."
+    if "fieldwork" in requirement_text and "field" not in combined_experience:
+        return "Opportunity explicitly requires fieldwork experience."
+    if "internship experience" in requirement_text and "intern" not in combined_experience:
+        return "Opportunity explicitly requires internship experience."
+    return None
+
+
+def _check_required_graduation_window(
+    student_profile: StudentProfile, requirement_text: str
+) -> str | None:
+    if student_profile.graduation_year == "TBD":
+        return None
+
+    years = re.findall(r"\b20\d{2}\b", requirement_text)
+    if "graduat" not in requirement_text and not years:
+        return None
+
+    student_year = student_profile.graduation_year
+    if len(years) >= 2:
+        low_year, high_year = min(years), max(years)
+        if not (low_year <= student_year <= high_year):
+            return f"Graduation year {student_year} falls outside the required {low_year}-{high_year} window."
+    elif len(years) == 1 and any(token in requirement_text for token in ["by", "before", "no later than"]):
+        if student_year > years[0]:
+            return f"Graduation year {student_year} is later than the required cutoff of {years[0]}."
+    return None
+
+
+def _check_required_financial_need(
+    student_profile: StudentProfile, requirement_text: str
+) -> str | None:
+    if "financial need" not in requirement_text and "need-based" not in requirement_text:
+        return None
+    if not student_profile.financial_need_flag:
+        return "Opportunity explicitly requires financial need, which is not indicated in the student's profile."
+    return None
+
+
+def _build_fit_analysis_fallback(
+    student_profile: StudentProfile, opportunity: OpportunityIntelligence
+) -> FitAnalysis:
+    fit_signals = _derive_fit_signals(student_profile, opportunity)
+    fit_gaps = _derive_fit_gaps(student_profile, opportunity)
+
+    semantic_fit_score = 0.35
+    if fit_signals:
+        semantic_fit_score += min(0.35, 0.08 * len(fit_signals))
+    if fit_gaps:
+        semantic_fit_score -= min(0.25, 0.05 * len(fit_gaps))
+    semantic_fit_score = max(0.0, min(1.0, round(semantic_fit_score, 2)))
+
+    narrative_alignment_score = 0.3
+    if any("Environmental or ocean interest" == theme for theme in student_profile.core_story_themes):
+        narrative_alignment_score += 0.2
+    if any(
+        token in opportunity.raw_theme.lower()
+        for token in ["ocean", "marine", "climate", "conservation", "coastal"]
+    ):
+        narrative_alignment_score += 0.15
+    if student_profile.leadership_signals:
+        narrative_alignment_score += 0.05
+    narrative_alignment_score = max(0.0, min(1.0, round(narrative_alignment_score, 2)))
+
+    return FitAnalysis(
+        eligible=True,
+        hard_filter_failures=[],
+        fit_signals=fit_signals,
+        fit_gaps=fit_gaps,
+        semantic_fit_score=semantic_fit_score,
+        narrative_alignment_score=narrative_alignment_score,
+        reasoning=(
+            f"Fallback fit analysis found {len(fit_signals)} supporting signals "
+            f"and {len(fit_gaps)} notable gaps for '{student_profile.name}' "
+            f"against '{opportunity.title}'."
+        ),
     )
 
 
@@ -801,6 +1052,84 @@ def _build_extract_opportunity_user_prompt(
         prompt_sections.extend(source_lines)
     prompt_sections.extend(["Opportunity text:", raw_text])
     return "\n\n".join(prompt_sections)
+
+
+def _derive_fit_signals(
+    student_profile: StudentProfile, opportunity: OpportunityIntelligence
+) -> list[str]:
+    signals = []
+    combined_profile_text = " ".join(
+        student_profile.interests
+        + student_profile.skills
+        + student_profile.core_story_themes
+        + student_profile.career_goals
+    ).lower()
+    opportunity_text = " ".join(
+        [
+            opportunity.raw_theme,
+            opportunity.opportunity_cluster,
+            " ".join(opportunity.soft_preferences),
+            " ".join(opportunity.essay_themes),
+        ]
+    ).lower()
+
+    if any(token in combined_profile_text for token in ["ocean", "marine", "conservation"]):
+        signals.append("Student profile shows direct ocean or marine interest.")
+    if any(token in combined_profile_text for token in ["climate", "sustainability", "policy"]):
+        signals.append("Student profile connects to climate or sustainability themes.")
+    if any(skill.lower() in opportunity_text for skill in student_profile.skills):
+        signals.append("Student skills overlap with the opportunity language.")
+    if student_profile.leadership_signals:
+        signals.append("Student profile includes leadership evidence.")
+    if any(token in opportunity_text for token in ["research", "lab"]) and any(
+        "research" in item.lower() for item in student_profile.work_experience + student_profile.core_story_themes
+    ):
+        signals.append("Student profile shows research alignment.")
+    community_evidence = (
+        student_profile.activities
+        + student_profile.work_experience
+        + student_profile.core_story_themes
+    )
+    if any(token in opportunity_text for token in ["community", "conservation"]) and any(
+        "community" in item.lower() or "volunteer" in item.lower()
+        for item in community_evidence
+    ):
+        signals.append("Student profile includes community-oriented evidence.")
+
+    return _dedupe_keep_order(signals)[:5]
+
+
+def _derive_fit_gaps(
+    student_profile: StudentProfile, opportunity: OpportunityIntelligence
+) -> list[str]:
+    gaps = []
+    opportunity_text = " ".join(
+        [
+            opportunity.raw_theme,
+            " ".join(requirement.requirement for requirement in opportunity.hard_requirements),
+            " ".join(opportunity.soft_preferences),
+        ]
+    ).lower()
+    combined_profile_text = " ".join(
+        student_profile.skills
+        + student_profile.interests
+        + student_profile.work_experience
+        + student_profile.activities
+    ).lower()
+
+    for keyword, gap_text in [
+        ("research", "Opportunity emphasizes research, but research evidence is limited."),
+        ("field", "Opportunity suggests field experience, which is not clearly reflected."),
+        ("policy", "Opportunity emphasizes policy, but policy evidence is limited."),
+        ("engineering", "Opportunity emphasizes engineering, but engineering evidence is limited."),
+    ]:
+        if keyword in opportunity_text and keyword not in combined_profile_text:
+            gaps.append(gap_text)
+
+    if opportunity.required_materials and not student_profile.evidence_bank:
+        gaps.append("Student evidence is limited for supporting application materials.")
+
+    return _dedupe_keep_order(gaps)[:5]
 
 
 def _build_opportunity_fallback(

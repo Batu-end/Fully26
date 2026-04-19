@@ -86,9 +86,51 @@ def test_extract_opportunity_service_returns_canonical_opportunity():
     assert opportunity.estimated_effort.effort_level in {"medium", "high"}
 
 
-def test_strategy_service_flow_returns_placeholder_models():
-    profile = parse_profile("Student profile input")
-    opportunity = extract_opportunity("Opportunity input")
+def test_analyze_fit_returns_early_on_hard_filter_failure():
+    profile = parse_profile(
+        "Avery Chen\nOcean State University\nB.S. in Marine Biology, GPA: 3.2, Expected Graduation 2027"
+    )
+    opportunity = extract_opportunity(
+        (
+            "Blue Ocean Fellowship\n"
+            "Applicants must have GPA 3.7 or higher.\n"
+            "Applicants must be enrolled students.\n"
+            "Deadline: June 15, 2026."
+        )
+    )
+    analysis = analyze_fit(profile, opportunity)
+
+    assert analysis.eligible is False
+    assert analysis.hard_filter_failures
+    assert "gpa" in analysis.hard_filter_failures[0].lower()
+    assert analysis.semantic_fit_score == 0.0
+    assert analysis.narrative_alignment_score == 0.0
+
+
+def test_analyze_fit_returns_fallback_soft_analysis():
+    profile = parse_profile(
+        (
+            "Avery Chen\n"
+            "Ocean State University\n"
+            "B.S. in Marine Biology, GPA: 3.8, Expected Graduation 2027\n"
+            "Research Assistant at Coastal Lab\n"
+            "President, Marine Conservation Club\n"
+            "Volunteer for community beach cleanup programs\n"
+            "Skills: Python, data analysis, GIS\n"
+            "Interested in ocean conservation and climate resilience."
+        )
+    )
+    opportunity = extract_opportunity(
+        (
+            "Blue Ocean Fellowship\n"
+            "Hosted by Ocean Lab.\n"
+            "Climate fellowship focused on coastal data and marine resilience.\n"
+            "Applicants must be enrolled students and submit a resume and essay.\n"
+            "Deadline: June 15, 2026.\n"
+            "Location: Remote.\n"
+            "Stipend: $5,000."
+        )
+    )
     analysis = analyze_fit(profile, opportunity)
     positioning = generate_positioning(profile, opportunity, analysis)
     draft = generate_draft(
@@ -98,9 +140,11 @@ def test_strategy_service_flow_returns_placeholder_models():
         application_prompt="Write a short application response.",
     )
 
-    assert analysis.semantic_fit_score == 0.0
-    assert positioning.best_angle == "Mission-aligned ocean opportunity candidate"
-    assert "placeholder" in draft.draft_answer.lower()
+    assert analysis.eligible is True
+    assert analysis.hard_filter_failures == []
+    assert analysis.semantic_fit_score > 0.0
+    assert analysis.narrative_alignment_score > 0.0
+    assert analysis.fit_signals
     assert draft.autofilled_fields[0].field == "opportunity_title"
 
 
