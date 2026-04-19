@@ -28,12 +28,26 @@ def test_parse_profile_service_returns_placeholder_profile():
     assert profile.evidence_bank[0].source_type == "self-report"
 
 
-def test_extract_opportunity_service_returns_placeholder_opportunity():
-    opportunity = extract_opportunity("Climate fellowship focused on coastal data.")
+def test_extract_opportunity_service_returns_canonical_opportunity():
+    opportunity = extract_opportunity(
+        (
+            "Blue Ocean Fellowship\n"
+            "Hosted by Ocean Lab.\n"
+            "Climate fellowship focused on coastal data and marine resilience.\n"
+            "Applicants must be enrolled students and submit a resume and essay.\n"
+            "Deadline: June 15, 2026.\n"
+            "Location: Remote.\n"
+            "Stipend: $5,000."
+        )
+    )
 
-    assert opportunity.title == "Placeholder Ocean Opportunity"
-    assert opportunity.provider == "Placeholder Organization"
-    assert "Climate fellowship focused on coastal data." in opportunity.raw_theme
+    assert opportunity.title == "Blue Ocean Fellowship"
+    assert opportunity.opportunity_type == "fellowship"
+    assert opportunity.amount_or_stipend == "$5,000"
+    assert opportunity.deadline == "June 15, 2026"
+    assert opportunity.location == "Remote"
+    assert opportunity.required_materials == ["Resume", "Essay"]
+    assert opportunity.estimated_effort.effort_level in {"medium", "high"}
 
 
 def test_strategy_service_flow_returns_placeholder_models():
