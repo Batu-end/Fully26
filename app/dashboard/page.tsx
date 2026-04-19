@@ -16,10 +16,8 @@ export default async function DashboardPage() {
     .select('*')
     .eq('id', user.id)
     .single();
-  console.log('Profile data:', profileData);
 
-  if (error) {
-    console.error('Error fetching profile:', error);
+  if (error || !profileData) {
     redirect('/profile/create');
   }
 

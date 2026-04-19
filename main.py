@@ -2,6 +2,7 @@
 import io
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from pypdf import PdfReader
 
 from ai_ocean_opportunity_schemas import (
@@ -23,11 +24,22 @@ from ai_ocean_opportunity_service import (
     generate_positioning,
     parse_profile,
 )
-from auth import verify_supabase_token
+from auth import verify_supabase_token, verify_supabase_token_or_demo
 import schemas
 from database import supabase
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ---------------------------------------------------------
@@ -126,9 +138,9 @@ def get_student_matches(student_id: str, payload=Depends(verify_supabase_token))
 async def analyze_resume(
     id: str,
     file: UploadFile = File(...),
-    payload: dict = Depends(verify_supabase_token),
+    payload: dict = Depends(verify_supabase_token_or_demo),
 ):
-    if payload.get("sub") != id:
+    if not payload.get("auth_bypassed") and payload.get("sub") != id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     try:
@@ -149,7 +161,7 @@ async def analyze_resume(
 # ---------------------------------------------------------
 @app.post("/api/ai/parse-profile", response_model=ParseProfileResponse)
 def handle_parse_profile(
-    request: ParseProfileRequest, _user=Depends(verify_supabase_token)
+    request: ParseProfileRequest, _user=Depends(verify_supabase_token_or_demo)
 ):
     return ParseProfileResponse(
         student_profile=parse_profile(
@@ -163,7 +175,7 @@ def handle_parse_profile(
 
 @app.post("/api/ai/extract-opportunity", response_model=ExtractOpportunityResponse)
 def handle_extract_opportunity(
-    request: ExtractOpportunityRequest, _user=Depends(verify_supabase_token)
+    request: ExtractOpportunityRequest, _user=Depends(verify_supabase_token_or_demo)
 ):
     return ExtractOpportunityResponse(
         opportunity=extract_opportunity(
@@ -176,7 +188,7 @@ def handle_extract_opportunity(
 
 @app.post("/api/ai/analyze-fit", response_model=AnalyzeFitResponse)
 def handle_analyze_fit(
-    request: AnalyzeFitRequest, _user=Depends(verify_supabase_token)
+    request: AnalyzeFitRequest, _user=Depends(verify_supabase_token_or_demo)
 ):
     return AnalyzeFitResponse(
         fit_analysis=analyze_fit(
@@ -190,7 +202,7 @@ def handle_analyze_fit(
     "/api/ai/generate-positioning", response_model=GeneratePositioningResponse
 )
 def handle_generate_positioning(
-    request: GeneratePositioningRequest, _user=Depends(verify_supabase_token)
+    request: GeneratePositioningRequest, _user=Depends(verify_supabase_token_or_demo)
 ):
     return GeneratePositioningResponse(
         positioning=generate_positioning(
@@ -203,7 +215,7 @@ def handle_generate_positioning(
 
 @app.post("/api/ai/generate-draft", response_model=GenerateDraftResponse)
 def handle_generate_draft(
-    request: GenerateDraftRequest, _user=Depends(verify_supabase_token)
+    request: GenerateDraftRequest, _user=Depends(verify_supabase_token_or_demo)
 ):
     return GenerateDraftResponse(
         draft=generate_draft(

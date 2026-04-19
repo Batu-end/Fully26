@@ -4,6 +4,12 @@ function getBackendUrl() {
   return process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 }
 
+function isDemoBypassEnabled() {
+  return (
+    process.env.NEXT_PUBLIC_DEMO_BYPASS_AUTH?.trim().toLowerCase() === 'true'
+  );
+}
+
 async function getAccessToken() {
   const supabase = createClient();
   const {
@@ -11,6 +17,9 @@ async function getAccessToken() {
   } = await supabase.auth.getSession();
 
   if (!session?.access_token) {
+    if (isDemoBypassEnabled()) {
+      return null;
+    }
     throw new Error('You must be signed in to use the AI demo.');
   }
 
@@ -24,6 +33,9 @@ export async function getSignedInUserId() {
   } = await supabase.auth.getUser();
 
   if (!user?.id) {
+    if (isDemoBypassEnabled()) {
+      return 'demo-user';
+    }
     throw new Error('You must be signed in to use the AI demo.');
   }
 
@@ -53,12 +65,17 @@ export async function backendJsonRequest<TResponse>(
   body: unknown,
 ) {
   const accessToken = await getAccessToken();
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  };
+
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
   const response = await fetch(`${getBackendUrl()}${path}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
+    headers,
     body: JSON.stringify(body),
   });
 
@@ -74,11 +91,15 @@ export async function backendFormRequest<TResponse>(
   formData: FormData,
 ) {
   const accessToken = await getAccessToken();
+  const headers: HeadersInit = {};
+
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
   const response = await fetch(`${getBackendUrl()}${path}`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+    headers,
     body: formData,
   });
 

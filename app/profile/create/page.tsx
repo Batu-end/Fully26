@@ -429,7 +429,7 @@ export default function CreateProfilePage() {
 
     const response = await runStep('parseProfile', () =>
       backendJsonRequest<ParseProfileResponse>('/api/ai/parse-profile', {
-        resume_text: resumeText.trim() || null,
+        resume_text: resumeText.trim(),
         form_data: formDataPayload,
         source_type: 'frontend-demo',
         source_label: 'profile-create-page',
@@ -456,7 +456,6 @@ export default function CreateProfilePage() {
         {
           raw_text: opportunityText.trim(),
           source_type: 'frontend-demo',
-          source_label: 'profile-create-page',
         },
       ),
     );

@@ -3,6 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { hasEnvVars } from "../utils";
 
 export async function updateSession(request: NextRequest) {
+  const isDemoBypassEnabled =
+    process.env.NEXT_PUBLIC_DEMO_BYPASS_AUTH?.trim().toLowerCase() === "true";
+  const isLocalDemoPath = request.nextUrl.pathname.startsWith("/profile/create");
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -51,7 +54,8 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname !== "/" &&
     !user &&
     !request.nextUrl.pathname.startsWith("/login") &&
-    !request.nextUrl.pathname.startsWith("/auth")
+    !request.nextUrl.pathname.startsWith("/auth") &&
+    !(isDemoBypassEnabled && isLocalDemoPath)
   ) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone();
