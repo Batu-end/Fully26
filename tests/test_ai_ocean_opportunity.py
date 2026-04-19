@@ -18,14 +18,50 @@ def _override_user():
     return {"sub": "test-user", "role": "authenticated"}
 
 
-def test_parse_profile_service_returns_placeholder_profile():
-    profile = parse_profile("Marine biology student interested in policy.")
+def test_parse_profile_service_returns_canonical_profile():
+    profile = parse_profile(
+        (
+            "Avery Chen\n"
+            "Ocean State University\n"
+            "B.S. in Marine Biology, GPA: 3.8, Expected Graduation 2027\n"
+            "Research Assistant at Coastal Lab\n"
+            "President, Marine Conservation Club\n"
+            "Volunteer for community beach cleanup programs\n"
+            "Skills: Python, data analysis, GIS\n"
+            "Interested in ocean conservation and climate resilience."
+        )
+    )
 
-    assert profile.name == "Placeholder Student"
-    assert profile.school == "Placeholder University"
-    assert "ocean" in profile.interests
-    assert "research" in profile.skills
+    assert profile.name == "Avery Chen"
+    assert profile.school == "Ocean State University"
+    assert profile.major == "Marine Biology"
+    assert profile.gpa == 3.8
+    assert profile.graduation_year == "2027"
+    assert "Python" in profile.skills
+    assert "Ocean" in profile.interests
+    assert "Leadership" in profile.core_story_themes
     assert profile.evidence_bank[0].source_type == "self-report"
+
+
+def test_parse_profile_prefers_explicit_form_data():
+    profile = parse_profile(
+        "Jordan Lee\nCoastal University\nB.S. in Environmental Science",
+        form_data={
+            "name": "Jordan Rivera",
+            "school": "Pacific Tech",
+            "major": "Ocean Engineering",
+            "financial_need_flag": True,
+            "skills": ["Writing", "R"],
+            "career_goals": ["Ocean policy"],
+        },
+    )
+
+    assert profile.name == "Jordan Rivera"
+    assert profile.school == "Pacific Tech"
+    assert profile.major == "Ocean Engineering"
+    assert profile.financial_need_flag is True
+    assert profile.skills[:2] == ["Writing", "R"]
+    assert profile.career_goals[0] == "Ocean policy"
 
 
 def test_extract_opportunity_service_returns_canonical_opportunity():
@@ -73,18 +109,26 @@ def test_parse_profile_route_returns_json_payload():
     try:
         response = client.post(
             "/api/ai/parse-profile",
-            json={"resume_text": "Student exploring blue economy internships."},
+            json={
+                "resume_text": (
+                    "Taylor Brooks\n"
+                    "Marine Tech University\n"
+                    "B.S. in Ocean Engineering, GPA: 3.6, Expected Graduation 2028\n"
+                    "Robotics Club Lead\n"
+                    "Interested in blue economy internships."
+                ),
+                "form_data": {"financial_need_flag": True},
+            },
         )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["student_profile"]["name"] == "Placeholder Student"
-    assert (
-        payload["student_profile"]["evidence_bank"][0]["detail"]
-        == "Student exploring blue economy internships."
-    )
+    assert payload["student_profile"]["name"] == "Taylor Brooks"
+    assert payload["student_profile"]["school"] == "Marine Tech University"
+    assert payload["student_profile"]["financial_need_flag"] is True
+    assert payload["student_profile"]["evidence_bank"][0]["source_type"] == "self-report"
 
 
 def test_generate_draft_route_returns_placeholder_draft():

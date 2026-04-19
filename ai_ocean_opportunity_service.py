@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+from typing import Any
 
 from ai_ocean_opportunity_openai import (
     OceanOpportunityOpenAIError,
@@ -20,54 +22,48 @@ from ai_ocean_opportunity_schemas import (
 
 
 def parse_profile(
-    resume_text: str,
-    form_data: dict | None = None,
+    resume_text: str | None = None,
+    form_data: dict[str, Any] | None = None,
     source_type: str | None = None,
     source_label: str | None = None,
 ) -> StudentProfile:
-    """Parse raw profile text into the canonical student profile contract.
+    """Parse resume text and optional form data into a canonical profile."""
 
-    TODO: Replace placeholder parsing with an LLM-backed extraction flow that
-    normalizes student evidence, story themes, and career goals into the
-    canonical StudentProfile schema.
-    """
+    cleaned_resume = (resume_text or "").strip()
+    normalized_form_data = form_data or {}
 
-    profile_summary = resume_text.strip() or "Profile parsing placeholder."
-    metadata_bits = [value for value in [source_type, source_label] if value]
-    if form_data:
-        metadata_bits.append("form-data captured")
+    try:
+        extracted_profile = call_openai_json(
+            system_prompt=_build_parse_profile_system_prompt(),
+            user_prompt=_build_parse_profile_user_prompt(
+                resume_text=cleaned_resume,
+                form_data=normalized_form_data,
+                source_type=source_type,
+                source_label=source_label,
+            ),
+            output_model=StudentProfile,
+        )
+    except OceanOpportunityOpenAIError:
+        extracted_profile = _build_profile_fallback(
+            resume_text=cleaned_resume,
+            form_data=normalized_form_data,
+            source_type=source_type,
+            source_label=source_label,
+        )
+    except Exception:
+        extracted_profile = _build_profile_fallback(
+            resume_text=cleaned_resume,
+            form_data=normalized_form_data,
+            source_type=source_type,
+            source_label=source_label,
+        )
 
-    return StudentProfile(
-        name="Placeholder Student",
-        school="Placeholder University",
-        major="Undeclared Ocean Opportunity Interest",
-        gpa=None,
-        student_type="undergraduate",
-        graduation_year="TBD",
-        activities=["Ocean club participation"],
-        work_experience=["Research support placeholder"],
-        leadership_signals=["Initiative shown in exploratory profile intake"],
-        awards=[],
-        skills=["research"],
-        interests=["ocean", "sustainability"],
-        financial_need_flag=False,
-        identity_flags_opt_in=[],
-        core_story_themes=[
-            "Mission-driven interest in ocean opportunity pathways",
-            profile_summary,
-        ],
-        evidence_bank=[
-            StudentEvidence(
-                label="Initial profile intake",
-                detail=(
-                    profile_summary
-                    if not metadata_bits
-                    else f"{profile_summary} ({', '.join(metadata_bits)})"
-                ),
-                source_type="self-report",
-            )
-        ],
-        career_goals=["strategy"],
+    return _merge_profile_with_form_data(
+        profile=extracted_profile,
+        resume_text=cleaned_resume,
+        form_data=normalized_form_data,
+        source_type=source_type,
+        source_label=source_label,
     )
 
 
@@ -204,6 +200,230 @@ def generate_draft(
     )
 
 
+def _build_parse_profile_system_prompt() -> str:
+    return (
+        "You extract a canonical StudentProfile for an AI Ocean Opportunity "
+        "Strategist. Merge resume text with any structured form data, and return "
+        "only data that fits the provided JSON schema.\n\n"
+        "Prefer explicit form data when it conflicts with inferred resume values. "
+        "Be conservative and do not invent credentials. If a scalar value is not "
+        "present, use 'TBD' for name, school, major, student_type, or "
+        "graduation_year as needed, and null for gpa if unavailable.\n"
+        "Normalize activities, work_experience, leadership_signals, awards, "
+        "skills, interests, core_story_themes, evidence_bank, and career_goals "
+        "into concise lists.\n"
+        "Infer useful themes such as leadership, research, community service, "
+        "resilience, academic merit, and environmental or ocean interest when "
+        "supported by the input.\n"
+        "Only include identity_flags_opt_in when explicitly supplied by the user. "
+        "Set financial_need_flag to true only when clearly stated in form data or "
+        "source text."
+    )
+
+
+def _build_parse_profile_user_prompt(
+    *,
+    resume_text: str,
+    form_data: dict[str, Any],
+    source_type: str | None,
+    source_label: str | None,
+) -> str:
+    payload = {
+        "source_type": source_type,
+        "source_label": source_label,
+        "resume_text": resume_text or None,
+        "form_data": form_data or None,
+    }
+    return (
+        "Extract a canonical StudentProfile object from the following combined "
+        "student input.\n\n"
+        f"{json.dumps(payload, indent=2, ensure_ascii=True)}"
+    )
+
+
+def _build_profile_fallback(
+    *,
+    resume_text: str,
+    form_data: dict[str, Any],
+    source_type: str | None,
+    source_label: str | None,
+) -> StudentProfile:
+    del source_type
+
+    name = _coerce_str(form_data.get("name")) or _extract_name_from_resume(resume_text)
+    school = _coerce_str(form_data.get("school")) or _extract_school_from_resume(
+        resume_text
+    )
+    major = _coerce_str(form_data.get("major")) or _extract_major_from_resume(resume_text)
+    gpa = _coerce_float(form_data.get("gpa"))
+    if gpa is None:
+        gpa = _extract_gpa_from_resume(resume_text)
+
+    student_type = _coerce_str(form_data.get("student_type")) or _infer_student_type(
+        resume_text
+    )
+    graduation_year = _coerce_str(
+        form_data.get("graduation_year")
+    ) or _extract_graduation_year(resume_text)
+
+    activities = _merge_preferred_list(
+        _coerce_list(form_data.get("activities")),
+        _extract_activities(resume_text),
+    )
+    work_experience = _merge_preferred_list(
+        _coerce_list(form_data.get("work_experience")),
+        _extract_work_experience(resume_text),
+    )
+    leadership_signals = _merge_preferred_list(
+        _coerce_list(form_data.get("leadership_signals")),
+        _extract_leadership_signals(resume_text),
+    )
+    awards = _merge_preferred_list(
+        _coerce_list(form_data.get("awards")),
+        _extract_awards(resume_text),
+    )
+    skills = _merge_preferred_list(
+        _coerce_list(form_data.get("skills")),
+        _extract_skills(resume_text),
+    )
+    interests = _merge_preferred_list(
+        _coerce_list(form_data.get("interests")),
+        _extract_interests(resume_text),
+    )
+    identity_flags_opt_in = _coerce_list(form_data.get("identity_flags_opt_in"))
+    career_goals = _merge_preferred_list(
+        _coerce_list(form_data.get("career_goals")),
+        _extract_career_goals(resume_text),
+    )
+
+    evidence_bank = _build_profile_evidence_bank(
+        resume_text=resume_text,
+        form_data=form_data,
+        source_label=source_label,
+        activities=activities,
+        work_experience=work_experience,
+        leadership_signals=leadership_signals,
+        awards=awards,
+    )
+
+    core_story_themes = _merge_preferred_list(
+        _coerce_list(form_data.get("core_story_themes")),
+        _infer_profile_themes(
+            resume_text=resume_text,
+            activities=activities,
+            work_experience=work_experience,
+            leadership_signals=leadership_signals,
+            awards=awards,
+            interests=interests,
+            gpa=gpa,
+        ),
+    )
+
+    return StudentProfile(
+        name=name or "TBD",
+        school=school or "TBD",
+        major=major or "TBD",
+        gpa=gpa,
+        student_type=student_type or "TBD",
+        graduation_year=graduation_year or "TBD",
+        activities=activities,
+        work_experience=work_experience,
+        leadership_signals=leadership_signals,
+        awards=awards,
+        skills=skills,
+        interests=interests,
+        financial_need_flag=_coerce_bool(form_data.get("financial_need_flag")) or False,
+        identity_flags_opt_in=identity_flags_opt_in,
+        core_story_themes=core_story_themes,
+        evidence_bank=evidence_bank,
+        career_goals=career_goals,
+    )
+
+
+def _merge_profile_with_form_data(
+    *,
+    profile: StudentProfile,
+    resume_text: str,
+    form_data: dict[str, Any],
+    source_type: str | None,
+    source_label: str | None,
+) -> StudentProfile:
+    data = _model_to_dict(profile)
+
+    for scalar_key in ["name", "school", "major", "student_type", "graduation_year"]:
+        explicit_value = _coerce_str(form_data.get(scalar_key))
+        if explicit_value:
+            data[scalar_key] = explicit_value
+
+    explicit_gpa = _coerce_float(form_data.get("gpa"))
+    if explicit_gpa is not None:
+        data["gpa"] = explicit_gpa
+
+    explicit_financial_need = _coerce_bool(form_data.get("financial_need_flag"))
+    if explicit_financial_need is not None:
+        data["financial_need_flag"] = explicit_financial_need
+
+    for list_key in [
+        "activities",
+        "work_experience",
+        "leadership_signals",
+        "awards",
+        "skills",
+        "interests",
+        "identity_flags_opt_in",
+        "core_story_themes",
+        "career_goals",
+    ]:
+        explicit_items = _coerce_list(form_data.get(list_key))
+        if explicit_items:
+            data[list_key] = _merge_preferred_list(explicit_items, data.get(list_key, []))
+        else:
+            data[list_key] = _dedupe_keep_order(data.get(list_key, []))
+
+    merged_evidence = _merge_evidence_bank(
+        _coerce_evidence_bank(data.get("evidence_bank")),
+        _build_profile_evidence_bank(
+            resume_text=resume_text,
+            form_data=form_data,
+            source_label=source_label,
+            activities=data["activities"],
+            work_experience=data["work_experience"],
+            leadership_signals=data["leadership_signals"],
+            awards=data["awards"],
+        ),
+    )
+    data["evidence_bank"] = merged_evidence
+
+    inferred_themes = _infer_profile_themes(
+        resume_text=resume_text,
+        activities=data["activities"],
+        work_experience=data["work_experience"],
+        leadership_signals=data["leadership_signals"],
+        awards=data["awards"],
+        interests=data["interests"],
+        gpa=data.get("gpa"),
+    )
+    data["core_story_themes"] = _merge_preferred_list(
+        data["core_story_themes"],
+        inferred_themes,
+    )
+
+    if not data["name"]:
+        data["name"] = "TBD"
+    if not data["school"]:
+        data["school"] = "TBD"
+    if not data["major"]:
+        data["major"] = "TBD"
+    if not data["student_type"]:
+        data["student_type"] = "TBD"
+    if not data["graduation_year"]:
+        data["graduation_year"] = "TBD"
+
+    del source_type
+
+    return StudentProfile(**data)
+
+
 def _build_extract_opportunity_system_prompt() -> str:
     return (
         "You extract structured opportunity intelligence for an AI Ocean "
@@ -226,6 +446,337 @@ def _build_extract_opportunity_system_prompt() -> str:
         "marine-research, blue-economy, climate-policy, conservation-fieldwork, "
         "ocean-engineering, or general-ocean."
     )
+
+
+def _extract_name_from_resume(resume_text: str) -> str:
+    for line in resume_text.splitlines():
+        cleaned_line = line.strip()
+        if not cleaned_line:
+            continue
+        if "@" in cleaned_line or re.search(r"\d", cleaned_line):
+            continue
+        if len(cleaned_line.split()) <= 4 and cleaned_line == cleaned_line.title():
+            return cleaned_line
+    return "TBD"
+
+
+def _extract_school_from_resume(resume_text: str) -> str:
+    patterns = [
+        r"([A-Z][A-Za-z&.\- ]+(?:University|College|Institute|School))",
+        r"(?:school|institution)\s*:\s*([^\n]{3,100})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, resume_text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip(" .,:;-")
+    return "TBD"
+
+
+def _extract_major_from_resume(resume_text: str) -> str:
+    patterns = [
+        r"(?:major|majoring in)\s*(?:in)?\s*[:\-]?\s*([^\n,;]{3,80})",
+        r"(?:B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?A\.?)\s+(?:in)\s+([^\n,;]{3,80})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, resume_text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip(" .,:;-")
+    return "TBD"
+
+
+def _extract_gpa_from_resume(resume_text: str) -> float | None:
+    match = re.search(r"\bGPA\s*[:\-]?\s*(\d\.\d{1,2})\b", resume_text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _infer_student_type(resume_text: str) -> str:
+    lowered = resume_text.lower()
+    if "phd" in lowered or "doctoral" in lowered:
+        return "doctoral"
+    if "master" in lowered or "graduate student" in lowered or "m.s." in lowered:
+        return "graduate"
+    if "high school" in lowered:
+        return "high-school"
+    if "undergraduate" in lowered or "b.s." in lowered or "b.a." in lowered:
+        return "undergraduate"
+    return "TBD"
+
+
+def _extract_graduation_year(resume_text: str) -> str:
+    patterns = [
+        r"(?:graduation|expected graduation|class of)\s*[:\-]?\s*(\d{4})",
+        r"(?:expected|grad(?:uation)?)\s*(?:date|year)?\s*[:\-]?\s*(\d{4})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, resume_text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    years = re.findall(r"\b20\d{2}\b", resume_text)
+    return years[0] if years else "TBD"
+
+
+def _extract_activities(resume_text: str) -> list[str]:
+    keywords = ["club", "society", "volunteer", "association", "team", "organization"]
+    return _extract_lines_by_keywords(resume_text, keywords, limit=6)
+
+
+def _extract_work_experience(resume_text: str) -> list[str]:
+    keywords = ["intern", "assistant", "research", "coordinator", "analyst", "engineer"]
+    return _extract_lines_by_keywords(resume_text, keywords, limit=6)
+
+
+def _extract_leadership_signals(resume_text: str) -> list[str]:
+    keywords = ["president", "founder", "captain", "lead", "chair", "organizer", "director"]
+    return _extract_lines_by_keywords(resume_text, keywords, limit=5)
+
+
+def _extract_awards(resume_text: str) -> list[str]:
+    keywords = ["award", "honor", "scholarship", "dean", "fellow", "prize"]
+    return _extract_lines_by_keywords(resume_text, keywords, limit=5)
+
+
+def _extract_skills(resume_text: str) -> list[str]:
+    lowered = resume_text.lower()
+    skill_map = [
+        ("python", "Python"),
+        ("data analysis", "Data analysis"),
+        ("gis", "GIS"),
+        ("research", "Research"),
+        ("writing", "Writing"),
+        ("communication", "Communication"),
+        ("excel", "Excel"),
+        ("matlab", "MATLAB"),
+        ("r ", "R"),
+        ("policy", "Policy analysis"),
+    ]
+    found = [label for keyword, label in skill_map if keyword in lowered]
+    return found[:8]
+
+
+def _extract_interests(resume_text: str) -> list[str]:
+    lowered = resume_text.lower()
+    interest_map = [
+        ("ocean", "Ocean"),
+        ("marine", "Marine science"),
+        ("climate", "Climate resilience"),
+        ("conservation", "Conservation"),
+        ("sustainability", "Sustainability"),
+        ("policy", "Policy"),
+        ("engineering", "Ocean engineering"),
+        ("research", "Research"),
+    ]
+    found = [label for keyword, label in interest_map if keyword in lowered]
+    return found[:8]
+
+
+def _extract_career_goals(resume_text: str) -> list[str]:
+    goals = []
+    patterns = [
+        r"(?:interested in|seeking|aspiring to|goal is to)\s+([^\n.]{5,120})",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, resume_text, flags=re.IGNORECASE):
+            goals.append(match.group(1).strip(" ."))
+    return _dedupe_keep_order(goals)[:5]
+
+
+def _build_profile_evidence_bank(
+    *,
+    resume_text: str,
+    form_data: dict[str, Any],
+    source_label: str | None,
+    activities: list[str],
+    work_experience: list[str],
+    leadership_signals: list[str],
+    awards: list[str],
+) -> list[StudentEvidence]:
+    evidence: list[StudentEvidence] = []
+
+    explicit_evidence = _coerce_evidence_bank(form_data.get("evidence_bank"))
+    evidence.extend(explicit_evidence)
+
+    if resume_text:
+        label = source_label or "Resume intake"
+        evidence.append(
+            StudentEvidence(
+                label=label,
+                detail=resume_text[:280],
+                source_type="self-report",
+            )
+        )
+
+    for activity in activities[:2]:
+        evidence.append(
+            StudentEvidence(label="Activity", detail=activity, source_type="activity")
+        )
+    for work_item in work_experience[:2]:
+        evidence.append(
+            StudentEvidence(label="Work experience", detail=work_item, source_type="work")
+        )
+    for leadership_item in leadership_signals[:2]:
+        evidence.append(
+            StudentEvidence(
+                label="Leadership signal",
+                detail=leadership_item,
+                source_type="leadership",
+            )
+        )
+    for award_item in awards[:2]:
+        evidence.append(
+            StudentEvidence(label="Award", detail=award_item, source_type="award")
+        )
+
+    return _merge_evidence_bank([], evidence)
+
+
+def _infer_profile_themes(
+    *,
+    resume_text: str,
+    activities: list[str],
+    work_experience: list[str],
+    leadership_signals: list[str],
+    awards: list[str],
+    interests: list[str],
+    gpa: float | None,
+) -> list[str]:
+    themes = []
+    lowered = resume_text.lower()
+
+    if leadership_signals or any("president" in item.lower() or "lead" in item.lower() for item in activities):
+        themes.append("Leadership")
+    if "research" in lowered or any("research" in item.lower() for item in work_experience):
+        themes.append("Research")
+    if "volunteer" in lowered or "community" in lowered or any("volunteer" in item.lower() for item in activities):
+        themes.append("Community service")
+    if "resilience" in lowered or "overcame" in lowered or "first-generation" in lowered:
+        themes.append("Resilience")
+    if (gpa is not None and gpa >= 3.5) or any(
+        "dean" in item.lower() or "honor" in item.lower() for item in awards
+    ):
+        themes.append("Academic merit")
+    if any("ocean" in interest.lower() or "marine" in interest.lower() for interest in interests) or any(
+        token in lowered for token in ["ocean", "marine", "climate", "conservation", "coastal"]
+    ):
+        themes.append("Environmental or ocean interest")
+
+    return themes
+
+
+def _merge_preferred_list(explicit_items: list[str], inferred_items: list[str]) -> list[str]:
+    return _dedupe_keep_order(explicit_items + inferred_items)
+
+
+def _coerce_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes", "1"}:
+            return True
+        if lowered in {"false", "no", "0"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return None
+
+
+def _coerce_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = re.split(r"[\n,;]+", value)
+        return _dedupe_keep_order([part.strip() for part in parts if part.strip()])
+    if isinstance(value, list):
+        return _dedupe_keep_order(
+            [_coerce_str(item) for item in value if _coerce_str(item)]
+        )
+    return []
+
+
+def _coerce_evidence_bank(value: Any) -> list[StudentEvidence]:
+    evidence: list[StudentEvidence] = []
+    if not value:
+        return evidence
+
+    items = value if isinstance(value, list) else [value]
+    for item in items:
+        if isinstance(item, StudentEvidence):
+            evidence.append(item)
+            continue
+        if isinstance(item, dict):
+            try:
+                evidence.append(StudentEvidence(**item))
+                continue
+            except Exception:
+                pass
+        item_text = _coerce_str(item)
+        if item_text:
+            evidence.append(
+                StudentEvidence(
+                    label="Profile evidence",
+                    detail=item_text,
+                    source_type="self-report",
+                )
+            )
+    return evidence
+
+
+def _merge_evidence_bank(
+    primary: list[StudentEvidence], secondary: list[StudentEvidence]
+) -> list[StudentEvidence]:
+    seen = set()
+    merged: list[StudentEvidence] = []
+    for item in primary + secondary:
+        key = (item.label.strip().lower(), item.detail.strip().lower(), item.source_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged[:10]
+
+
+def _extract_lines_by_keywords(
+    resume_text: str, keywords: list[str], limit: int
+) -> list[str]:
+    matches = []
+    for line in resume_text.splitlines():
+        cleaned_line = line.strip(" -\t")
+        if not cleaned_line:
+            continue
+        lowered = cleaned_line.lower()
+        if any(keyword in lowered for keyword in keywords):
+            matches.append(cleaned_line[:140])
+    return _dedupe_keep_order(matches)[:limit]
+
+
+def _model_to_dict(model: Any) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
 
 
 def _build_extract_opportunity_user_prompt(
