@@ -1,12 +1,24 @@
 # PURPOSE: Main FastAPI application entry point, defining all API endpoints.
 import io
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from pypdf import PdfReader
 from auth import verify_supabase_token
 import schemas
 from database import supabase
 
 app = FastAPI()
+
+# ---------------------------------------------------------
+# CORS CONFIGURATION (Crucial for Frontend/React connection)
+# ---------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, change this to your exact React frontend URL!
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---------------------------------------------------------
 # UNPROTECTED ROUTE (Open to the public)
