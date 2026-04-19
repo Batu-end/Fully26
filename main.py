@@ -67,13 +67,18 @@ def create_student(student: schemas.StudentProfileCreate, payload=Depends(verify
 # OPPORTUNITY ENDPOINTS
 # ---------------------------------------------------------
 @app.get("/api/opportunities", response_model=list[schemas.OpportunityResponse])
-def get_opportunities(payload=Depends(verify_supabase_token)):
-    # 1. Fetch all available opportunities from the database using our service client
+def get_opportunities(page: int = 1, page_size: int = 10, payload=Depends(verify_supabase_token)):
+    # 1. Calculate pagination offset
+    offset = (page - 1) * page_size
+    
     try:
-        # We can limit or paginate here later, but for MVP we fetch all.
-        response = supabase.table("opportunities").select("*").execute()
+        # 2. Fetch opportunities with pagination using limit and offset
+        response = supabase.table("opportunities") \
+            .select("*") \
+            .range(offset, offset + page_size - 1) \
+            .execute()
         
-        # 2. Return the pure JSON data. FastAPI will automatically check it against schemas.OpportunityResponse
+        # 3. Return the paginated data
         return response.data
         
     except Exception as e:
