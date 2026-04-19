@@ -148,30 +148,42 @@ def generate_positioning(
     opportunity: OpportunityIntelligence,
     fit_analysis: FitAnalysis,
 ) -> Positioning:
-    """Generate positioning guidance for how the student should present fit.
+    """Generate strategic positioning guidance from canonical fit inputs."""
 
-    TODO: Add tailored AI-generated positioning language, value propositions,
-    and talking points grounded in the fit analysis.
-    """
+    if fit_analysis.eligible is False:
+        return _build_ineligible_positioning(
+            student_profile=student_profile,
+            opportunity=opportunity,
+            fit_analysis=fit_analysis,
+        )
 
-    return Positioning(
-        best_angle="Mission-aligned ocean opportunity candidate",
-        why_this_angle=(
-            f"Connect {student_profile.name or 'the student'} to "
-            f"{opportunity.title or 'the opportunity'} using the available "
-            f"fit context: {fit_analysis.reasoning}"
-        ),
-        evidence_to_use=[
-            "Highlight relevant motivation.",
-            "Reference aligned skills or coursework.",
-            "Tie experience to ocean opportunity goals.",
-        ],
-        things_to_avoid=[
-            "Claiming eligibility before hard requirements are validated.",
-            "Overstating domain experience not present in the profile.",
-        ],
-        missing_story_piece="A concrete proof point with measurable impact.",
-    )
+    try:
+        model_positioning = call_openai_json(
+            system_prompt=_build_positioning_system_prompt(),
+            user_prompt=_build_positioning_user_prompt(
+                student_profile, opportunity, fit_analysis
+            ),
+            output_model=Positioning,
+        )
+        return Positioning(
+            best_angle=model_positioning.best_angle.strip(),
+            why_this_angle=model_positioning.why_this_angle.strip(),
+            evidence_to_use=_dedupe_keep_order(model_positioning.evidence_to_use)[:5],
+            things_to_avoid=_dedupe_keep_order(model_positioning.things_to_avoid)[:5],
+            missing_story_piece=model_positioning.missing_story_piece.strip(),
+        )
+    except OceanOpportunityOpenAIError:
+        return _build_positioning_fallback(
+            student_profile=student_profile,
+            opportunity=opportunity,
+            fit_analysis=fit_analysis,
+        )
+    except Exception:
+        return _build_positioning_fallback(
+            student_profile=student_profile,
+            opportunity=opportunity,
+            fit_analysis=fit_analysis,
+        )
 
 
 def generate_draft(
@@ -181,41 +193,44 @@ def generate_draft(
     essay_prompt: str | None = None,
     application_prompt: str | None = None,
 ) -> Draft:
-    """Generate a first-pass draft for applications or outreach.
+    """Generate an editable first draft grounded in canonical AI inputs."""
 
-    TODO: Replace placeholder drafting with model-generated content that adapts
-    tone and structure for the essay or application prompt.
-    """
+    selected_prompt = essay_prompt or application_prompt
 
-    prompt_focus = essay_prompt or application_prompt or "the requested application"
-    return Draft(
-        autofilled_fields=[
-            DraftField(
-                field="opportunity_title",
-                value=opportunity.title,
-                confidence=0.95,
+    try:
+        model_draft = call_openai_json(
+            system_prompt=_build_draft_system_prompt(),
+            user_prompt=_build_draft_user_prompt(
+                student_profile=student_profile,
+                opportunity=opportunity,
+                positioning=positioning,
+                essay_prompt=essay_prompt,
+                application_prompt=application_prompt,
             ),
-            DraftField(
-                field="best_angle",
-                value=positioning.best_angle,
-                confidence=0.75,
-            ),
-        ],
-        draft_answer=(
-            "This is a placeholder draft for the AI Ocean Opportunity Strategist. "
-            f"It will eventually tailor content for {student_profile.name} using "
-            f"{positioning.best_angle} and {prompt_focus}."
-        ),
-        draft_outline=[
-            f"Open with motivation for {opportunity.title}.",
-            "Connect relevant student evidence to the opportunity.",
-            "Close with forward-looking contribution and fit.",
-        ],
-        user_edit_required=[
-            "Validate factual claims against the student's real evidence.",
-            "Tailor tone and specificity to the exact application prompt.",
-        ],
-    )
+            output_model=Draft,
+        )
+        if not model_draft.draft_answer.strip():
+            raise ValueError("Model draft answer was empty.")
+        return Draft(
+            autofilled_fields=_normalize_draft_fields(model_draft.autofilled_fields),
+            draft_answer=model_draft.draft_answer.strip(),
+            draft_outline=_dedupe_keep_order(model_draft.draft_outline)[:6],
+            user_edit_required=_dedupe_keep_order(model_draft.user_edit_required)[:6],
+        )
+    except OceanOpportunityOpenAIError:
+        return _build_draft_fallback(
+            student_profile=student_profile,
+            opportunity=opportunity,
+            positioning=positioning,
+            selected_prompt=selected_prompt,
+        )
+    except Exception:
+        return _build_draft_fallback(
+            student_profile=student_profile,
+            opportunity=opportunity,
+            positioning=positioning,
+            selected_prompt=selected_prompt,
+        )
 
 
 def _build_fit_analysis_system_prompt() -> str:
@@ -228,6 +243,75 @@ def _build_fit_analysis_system_prompt() -> str:
         "semantic_fit_score, narrative_alignment_score, and concise reasoning.\n"
         "Use scores from 0.0 to 1.0. Be conservative, grounded in the provided "
         "fields only, and do not predict selection odds or chances of winning."
+    )
+
+
+def _build_positioning_system_prompt() -> str:
+    return (
+        "You generate concise strategic positioning guidance for an AI Ocean "
+        "Opportunity Strategist. Return only the canonical Positioning schema.\n\n"
+        "Base the advice primarily on fit_analysis fields: eligible, "
+        "hard_filter_failures, fit_signals, fit_gaps, semantic_fit_score, "
+        "narrative_alignment_score, and reasoning.\n"
+        "Use the student evidence bank, story themes, and opportunity themes to "
+        "identify the strongest narrative angle.\n"
+        "Keep best_angle and why_this_angle specific and concise. Recommend "
+        "concrete evidence to use. Flag weak or generic approaches to avoid. If "
+        "fit is limited, be honest and do not invent a strong narrative."
+    )
+
+
+def _build_draft_system_prompt() -> str:
+    return (
+        "You generate an editable first draft for an AI Ocean Opportunity "
+        "Strategist. Return only the canonical Draft schema.\n\n"
+        "Use only factual student evidence and the provided opportunity details. "
+        "Do not fabricate experience, impact, or credentials. If the available "
+        "evidence is thin, write a cautious incomplete draft with clear room for "
+        "user editing instead of a polished false answer.\n"
+        "Use positioning.best_angle, why_this_angle, evidence_to_use, "
+        "things_to_avoid, and missing_story_piece as the narrative guide.\n"
+        "If both essay_prompt and application_prompt are present, prefer "
+        "essay_prompt.\n"
+        "Keep the result grounded, specific, concise, and editable."
+    )
+
+
+def _build_draft_user_prompt(
+    *,
+    student_profile: StudentProfile,
+    opportunity: OpportunityIntelligence,
+    positioning: Positioning,
+    essay_prompt: str | None,
+    application_prompt: str | None,
+) -> str:
+    payload = {
+        "student_profile": _model_to_dict(student_profile),
+        "opportunity": _model_to_dict(opportunity),
+        "positioning": _model_to_dict(positioning),
+        "essay_prompt": essay_prompt,
+        "application_prompt": application_prompt,
+        "selected_prompt": essay_prompt or application_prompt,
+    }
+    return (
+        "Generate a grounded editable first draft for this opportunity.\n\n"
+        f"{json.dumps(payload, indent=2, ensure_ascii=True)}"
+    )
+
+
+def _build_positioning_user_prompt(
+    student_profile: StudentProfile,
+    opportunity: OpportunityIntelligence,
+    fit_analysis: FitAnalysis,
+) -> str:
+    payload = {
+        "student_profile": _model_to_dict(student_profile),
+        "opportunity": _model_to_dict(opportunity),
+        "fit_analysis": _model_to_dict(fit_analysis),
+    }
+    return (
+        "Generate positioning guidance for this student and opportunity.\n\n"
+        f"{json.dumps(payload, indent=2, ensure_ascii=True)}"
     )
 
 
@@ -448,6 +532,134 @@ def _build_fit_analysis_fallback(
             f"and {len(fit_gaps)} notable gaps for '{student_profile.name}' "
             f"against '{opportunity.title}'."
         ),
+    )
+
+
+def _build_ineligible_positioning(
+    *,
+    student_profile: StudentProfile,
+    opportunity: OpportunityIntelligence,
+    fit_analysis: FitAnalysis,
+) -> Positioning:
+    return Positioning(
+        best_angle="Address the eligibility limitation directly",
+        why_this_angle=(
+            f"{student_profile.name} appears ineligible for {opportunity.title} "
+            f"based on the current hard requirements, so the safest approach is "
+            "to verify eligibility before investing in a stronger narrative."
+        ),
+        evidence_to_use=_select_positioning_evidence(student_profile, opportunity)[:3],
+        things_to_avoid=[
+            "Do not imply eligibility when hard filters appear unmet.",
+            "Do not overbuild a narrative before confirming the requirements.",
+            *[
+                failure for failure in fit_analysis.hard_filter_failures[:2]
+            ],
+        ][:5],
+        missing_story_piece="Confirmed eligibility or an alternate qualifying pathway.",
+    )
+
+
+def _build_positioning_fallback(
+    *,
+    student_profile: StudentProfile,
+    opportunity: OpportunityIntelligence,
+    fit_analysis: FitAnalysis,
+) -> Positioning:
+    best_angle = _derive_best_angle(student_profile, opportunity, fit_analysis)
+    evidence_to_use = _select_positioning_evidence(student_profile, opportunity)
+    things_to_avoid = _derive_things_to_avoid(fit_analysis)
+    missing_story_piece = _derive_missing_story_piece(student_profile, fit_analysis)
+
+    return Positioning(
+        best_angle=best_angle,
+        why_this_angle=(
+            f"This angle fits because {fit_analysis.reasoning.lower()} It also "
+            f"matches the opportunity's {opportunity.opportunity_cluster} focus."
+        ),
+        evidence_to_use=evidence_to_use[:5],
+        things_to_avoid=things_to_avoid[:5],
+        missing_story_piece=missing_story_piece,
+    )
+
+
+def _build_draft_fallback(
+    *,
+    student_profile: StudentProfile,
+    opportunity: OpportunityIntelligence,
+    positioning: Positioning,
+    selected_prompt: str | None,
+) -> Draft:
+    evidence_snippets = _select_draft_evidence_snippets(student_profile, positioning)
+    cautious_mode = _should_use_cautious_draft_mode(student_profile, positioning)
+    prompt_label = selected_prompt or f"response for {opportunity.title}"
+
+    opening = (
+        f"I am excited to apply for {opportunity.title} because "
+        f"{positioning.best_angle.lower()}."
+    )
+    evidence_sentence = (
+        f"From my experience, I can point to {evidence_snippets[0]}."
+        if evidence_snippets
+        else "My current profile shows interest in this opportunity, but it still needs a stronger concrete example."
+    )
+    connection_sentence = (
+        f"These experiences connect to {opportunity.raw_theme.lower()} and to the values behind {opportunity.provider}."
+        if opportunity.raw_theme and opportunity.provider != "TBD"
+        else f"These experiences connect to the goals of {opportunity.title}."
+    )
+
+    if cautious_mode:
+        draft_answer = " ".join(
+            [
+                opening,
+                evidence_sentence,
+                connection_sentence,
+                f"I would need to add a clearer example showing {positioning.missing_story_piece.lower()} before treating this as a final {prompt_label}.",
+            ]
+        )
+    else:
+        extra_evidence = (
+            f" I would also highlight {evidence_snippets[1]}."
+            if len(evidence_snippets) > 1
+            else ""
+        )
+        draft_answer = " ".join(
+            [
+                opening,
+                evidence_sentence + extra_evidence,
+                connection_sentence,
+                f"This is the angle I would develop in response to {prompt_label}.",
+            ]
+        )
+
+    draft_outline = [
+        f"Open with motivation for {opportunity.title} and the angle '{positioning.best_angle}'.",
+        "Use one verified experience or project as the main proof point.",
+        f"Connect that evidence to {opportunity.raw_theme or 'the opportunity theme'}.",
+        f"Close with forward-looking contribution while acknowledging {positioning.missing_story_piece.lower()}.",
+    ]
+
+    user_edit_required = [
+        "Check every factual claim against the student profile and evidence bank.",
+        f"Add a concrete example showing {positioning.missing_story_piece.lower()}.",
+        "Tailor the tone and length to the exact prompt wording.",
+    ]
+    if selected_prompt:
+        user_edit_required.append("Align the response directly to the selected essay/application prompt.")
+    if positioning.things_to_avoid:
+        user_edit_required.append(positioning.things_to_avoid[0])
+
+    return Draft(
+        autofilled_fields=_build_autofilled_fields(
+            opportunity=opportunity,
+            positioning=positioning,
+            selected_prompt=selected_prompt,
+            cautious_mode=cautious_mode,
+        ),
+        draft_answer=draft_answer.strip(),
+        draft_outline=_dedupe_keep_order(draft_outline)[:6],
+        user_edit_required=_dedupe_keep_order(user_edit_required)[:6],
     )
 
 
@@ -1130,6 +1342,205 @@ def _derive_fit_gaps(
         gaps.append("Student evidence is limited for supporting application materials.")
 
     return _dedupe_keep_order(gaps)[:5]
+
+
+def _derive_best_angle(
+    student_profile: StudentProfile,
+    opportunity: OpportunityIntelligence,
+    fit_analysis: FitAnalysis,
+) -> str:
+    combined_text = " ".join(
+        student_profile.core_story_themes
+        + student_profile.interests
+        + student_profile.skills
+        + fit_analysis.fit_signals
+    ).lower()
+    opportunity_text = " ".join(
+        [
+            opportunity.opportunity_cluster,
+            opportunity.raw_theme,
+            " ".join(opportunity.soft_preferences),
+            " ".join(opportunity.essay_themes),
+        ]
+    ).lower()
+
+    if "engineering" in opportunity_text and any(
+        token in combined_text for token in ["engineering", "python", "gis", "matlab"]
+    ):
+        return "Applied ocean problem-solver with technical relevance"
+    if any(token in opportunity_text for token in ["research", "lab"]) and any(
+        token in combined_text for token in ["research", "marine", "science"]
+    ):
+        return "Mission-aligned marine research contributor"
+    if any(token in opportunity_text for token in ["policy", "climate"]) and any(
+        token in combined_text for token in ["policy", "climate", "sustainability"]
+    ):
+        return "Climate-focused ocean mission candidate"
+    if any(token in opportunity_text for token in ["community", "conservation"]) and any(
+        token in combined_text for token in ["leadership", "community", "conservation", "volunteer"]
+    ):
+        return "Community-minded ocean stewardship leader"
+    return "Mission-aligned ocean opportunity candidate"
+
+
+def _select_positioning_evidence(
+    student_profile: StudentProfile, opportunity: OpportunityIntelligence
+) -> list[str]:
+    evidence_choices = []
+    opportunity_text = " ".join(
+        [
+            opportunity.raw_theme,
+            opportunity.opportunity_cluster,
+            " ".join(opportunity.soft_preferences),
+            " ".join(opportunity.essay_themes),
+        ]
+    ).lower()
+    opportunity_tokens = {
+        token
+        for token in re.findall(r"[a-z][a-z\-]{3,}", opportunity_text)
+        if token not in {"with", "from", "that", "this", "have", "will", "into"}
+    }
+
+    for evidence in student_profile.evidence_bank:
+        detail = evidence.detail.strip()
+        if not detail:
+            continue
+        detail_lower = detail.lower()
+        if any(
+            token in detail_lower
+            for token in ["ocean", "marine", "climate", "coastal", "research", "lead", "volunteer"]
+        ):
+            evidence_choices.append(detail)
+        elif any(token in detail_lower for token in opportunity_tokens):
+            evidence_choices.append(detail)
+
+    if not evidence_choices:
+        evidence_choices.extend(student_profile.work_experience[:2])
+        evidence_choices.extend(student_profile.activities[:2])
+        evidence_choices.extend(student_profile.leadership_signals[:2])
+
+    if not evidence_choices and student_profile.skills:
+        evidence_choices.append(
+            f"Relevant skills: {', '.join(student_profile.skills[:3])}."
+        )
+
+    if not evidence_choices:
+        evidence_choices.append("Use the strongest verified experience from the student's profile.")
+
+    return _dedupe_keep_order(evidence_choices)[:5]
+
+
+def _derive_things_to_avoid(fit_analysis: FitAnalysis) -> list[str]:
+    avoid = [
+        "Do not rely on generic passion statements without evidence.",
+        "Do not overclaim domain expertise that is not in the profile.",
+    ]
+    if fit_analysis.fit_gaps:
+        avoid.append(f"Do not ignore the main gap: {fit_analysis.fit_gaps[0]}")
+    if fit_analysis.semantic_fit_score < 0.45:
+        avoid.append("Do not frame the fit as stronger than the current evidence supports.")
+    return _dedupe_keep_order(avoid)
+
+
+def _derive_missing_story_piece(
+    student_profile: StudentProfile, fit_analysis: FitAnalysis
+) -> str:
+    if fit_analysis.fit_gaps:
+        return fit_analysis.fit_gaps[0]
+    if not student_profile.leadership_signals and "Leadership" in student_profile.core_story_themes:
+        return "A concrete leadership example with measurable impact."
+    if not student_profile.evidence_bank:
+        return "A concrete proof point from coursework, work, or community involvement."
+    if any("Environmental or ocean interest" == theme for theme in student_profile.core_story_themes):
+        return "A quantified example showing impact in an ocean or climate context."
+    return "A concise example with measurable impact that supports the core angle."
+
+
+def _select_draft_evidence_snippets(
+    student_profile: StudentProfile, positioning: Positioning
+) -> list[str]:
+    snippets = []
+    positioning_text = " ".join(
+        [positioning.best_angle, positioning.why_this_angle] + positioning.evidence_to_use
+    ).lower()
+
+    for evidence in student_profile.evidence_bank:
+        detail = evidence.detail.strip()
+        if not detail:
+            continue
+        detail_lower = detail.lower()
+        if any(token in detail_lower for token in ["ocean", "marine", "climate", "research", "lead", "project"]):
+            snippets.append(detail)
+        elif any(token in detail_lower for token in re.findall(r"[a-z][a-z\-]{3,}", positioning_text)):
+            snippets.append(detail)
+
+    if not snippets:
+        snippets.extend(positioning.evidence_to_use[:3])
+    if not snippets:
+        snippets.extend(student_profile.work_experience[:2])
+        snippets.extend(student_profile.activities[:2])
+
+    return _dedupe_keep_order(snippets)[:4]
+
+
+def _should_use_cautious_draft_mode(
+    student_profile: StudentProfile, positioning: Positioning
+) -> bool:
+    if "eligibility limitation" in positioning.best_angle.lower():
+        return True
+    if "confirm" in positioning.missing_story_piece.lower():
+        return True
+    if len(student_profile.evidence_bank) == 0 and not student_profile.work_experience:
+        return True
+    if any(
+        phrase in positioning.missing_story_piece.lower()
+        for phrase in ["concrete", "proof point", "measurable impact"]
+    ) and len(student_profile.evidence_bank) < 2:
+        return True
+    return False
+
+
+def _build_autofilled_fields(
+    *,
+    opportunity: OpportunityIntelligence,
+    positioning: Positioning,
+    selected_prompt: str | None,
+    cautious_mode: bool,
+) -> list[DraftField]:
+    fields = [
+        DraftField(field="opportunity_title", value=opportunity.title, confidence=0.98),
+        DraftField(field="provider", value=opportunity.provider, confidence=0.92),
+        DraftField(field="best_angle", value=positioning.best_angle, confidence=0.8),
+    ]
+    if selected_prompt:
+        fields.append(
+            DraftField(field="selected_prompt", value=selected_prompt, confidence=0.95)
+        )
+    fields.append(
+        DraftField(
+            field="draft_mode",
+            value="cautious" if cautious_mode else "standard",
+            confidence=0.9,
+        )
+    )
+    return fields[:5]
+
+
+def _normalize_draft_fields(fields: list[DraftField]) -> list[DraftField]:
+    normalized = []
+    for field in fields[:5]:
+        if not field.field.strip() or not field.value.strip():
+            continue
+        normalized.append(
+            DraftField(
+                field=field.field.strip(),
+                value=field.value.strip(),
+                confidence=max(0.0, min(1.0, field.confidence)),
+            )
+        )
+    return normalized or [
+        DraftField(field="draft_mode", value="standard", confidence=0.5)
+    ]
 
 
 def _build_opportunity_fallback(

@@ -106,6 +106,11 @@ def test_analyze_fit_returns_early_on_hard_filter_failure():
     assert analysis.semantic_fit_score == 0.0
     assert analysis.narrative_alignment_score == 0.0
 
+    positioning = generate_positioning(profile, opportunity, analysis)
+    assert positioning.best_angle == "Address the eligibility limitation directly"
+    assert "eligibility" in positioning.why_this_angle.lower()
+    assert positioning.missing_story_piece == "Confirmed eligibility or an alternate qualifying pathway."
+
 
 def test_analyze_fit_returns_fallback_soft_analysis():
     profile = parse_profile(
@@ -145,6 +150,13 @@ def test_analyze_fit_returns_fallback_soft_analysis():
     assert analysis.semantic_fit_score > 0.0
     assert analysis.narrative_alignment_score > 0.0
     assert analysis.fit_signals
+    assert positioning.best_angle != "Mission-aligned ocean opportunity candidate" or positioning.evidence_to_use
+    assert positioning.evidence_to_use
+    assert positioning.things_to_avoid
+    assert positioning.missing_story_piece
+    assert draft.draft_answer
+    assert draft.draft_outline
+    assert draft.user_edit_required
     assert draft.autofilled_fields[0].field == "opportunity_title"
 
 
@@ -249,5 +261,7 @@ def test_generate_draft_route_returns_placeholder_draft():
 
     assert response.status_code == 200
     payload = response.json()
-    assert "placeholder" in payload["draft"]["draft_answer"].lower()
+    assert "blue economy fellowship" in payload["draft"]["draft_answer"].lower()
     assert payload["draft"]["autofilled_fields"][0]["field"] == "opportunity_title"
+    assert payload["draft"]["draft_outline"]
+    assert payload["draft"]["user_edit_required"]
