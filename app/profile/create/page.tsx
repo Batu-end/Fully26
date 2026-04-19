@@ -116,7 +116,7 @@ export default function CreateProfilePage() {
       const backendUrl =
         process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
-      // Send request
+      // Send request 
       const response = await fetch(
         `${backendUrl}/api/students/${user.id}/analyze-resume`,
         {
@@ -151,10 +151,10 @@ export default function CreateProfilePage() {
 
       // Success → go to dashboard
       router.push('/dashboard');
-      router.refresh();
-    } catch (err: any) {
+      router.refresh(); 
+    } catch (err) {
       console.error('Submission error:', err);
-      setError(err.message || 'Something went wrong.');
+      setError('Something went wrong.');
     } finally {
       setIsLoading(false);
     }
