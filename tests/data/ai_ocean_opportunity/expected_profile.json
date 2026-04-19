@@ -1,0 +1,69 @@
+{
+  "name": "Avery Chen",
+  "school": "Ocean State University",
+  "major": "Marine Biology",
+  "gpa": 3.8,
+  "student_type": "undergraduate",
+  "graduation_year": "2027",
+  "activities": [
+    "President, Marine Conservation Club",
+    "Volunteer for community beach cleanup programs"
+  ],
+  "work_experience": [
+    "Research Assistant at Coastal Lab studying marine resilience"
+  ],
+  "leadership_signals": [
+    "President, Marine Conservation Club"
+  ],
+  "awards": [],
+  "skills": [
+    "Python",
+    "Data analysis",
+    "GIS",
+    "Research"
+  ],
+  "interests": [
+    "Ocean",
+    "Marine science",
+    "Climate resilience",
+    "Conservation",
+    "Research"
+  ],
+  "financial_need_flag": false,
+  "identity_flags_opt_in": [],
+  "core_story_themes": [
+    "Leadership",
+    "Research",
+    "Community service",
+    "Academic merit",
+    "Environmental or ocean interest"
+  ],
+  "evidence_bank": [
+    {
+      "label": "Resume intake",
+      "detail": "Avery Chen\nOcean State University\nB.S. in Marine Biology, GPA: 3.8, Expected Graduation 2027\nResearch Assistant at Coastal Lab studying marine resilience\nPresident, Marine Conservation Club\nVolunteer for community beach cleanup programs\nSkills: Python, data analysis, GIS\nIntereste",
+      "source_type": "self-report"
+    },
+    {
+      "label": "Activity",
+      "detail": "President, Marine Conservation Club",
+      "source_type": "activity"
+    },
+    {
+      "label": "Activity",
+      "detail": "Volunteer for community beach cleanup programs",
+      "source_type": "activity"
+    },
+    {
+      "label": "Work experience",
+      "detail": "Research Assistant at Coastal Lab studying marine resilience",
+      "source_type": "work"
+    },
+    {
+      "label": "Leadership signal",
+      "detail": "President, Marine Conservation Club",
+      "source_type": "leadership"
+    }
+  ],
+  "career_goals": []
+}
