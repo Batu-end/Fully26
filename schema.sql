@@ -23,11 +23,11 @@ CREATE TABLE public.opportunities (
 -- The ID here is a UUID because it matches the Supabase Auth User ID perfectly.
 CREATE TABLE public.student_profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    education_level TEXT NOT NULL,
-    major TEXT NOT NULL,
-    interests TEXT NOT NULL,
-    resume_text TEXT NOT NULL,
+    name TEXT,
+    education_level TEXT,
+    major TEXT,
+    interests TEXT,
+    resume_text TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

@@ -6,11 +6,12 @@ from typing import Optional, List
 # STUDENT PROFILE SCHEMAS
 # ---------------------------------------------------------
 class StudentProfileBase(BaseModel):
-    name: str
-    education_level: str
-    major: str
-    interests: str  # e.g., "conservation, robotics, marine biolgy"
-    resume_text: str  # Extracted text from the uploaded resume
+    # AI will fill these fields in
+    name: Optional[str] = None
+    education_level: Optional[str] = None
+    major: Optional[str] = None
+    interests: Optional[str] = None  # e.g., "conservation, robotics, marine biolgy"
+    resume_text: Optional[str] = None  # Extracted text from the uploaded resume
 
 class StudentProfileCreate(StudentProfileBase):
     pass
@@ -49,10 +50,10 @@ class OpportunityResponse(OpportunityBase):
 class OpportunityMatchBase(BaseModel):
     student_id: str
     opportunity_id: int
-    fit_score: float
-    fit_explanation: str
-    suggested_angle: str
-    draft_starter_text: str
+    fit_score: float 
+    fit_explanation: str # AI's explanation of why this opportunity is a good fit for the student
+    suggested_angle: str # AI's suggested angle for the cover letter
+    draft_starter_text: str # AI's suggested starter text for the cover letter
     status: str = "new"  # new, saved, applied
 
 class OpportunityMatchCreate(OpportunityMatchBase):

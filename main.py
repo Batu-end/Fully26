@@ -1,5 +1,7 @@
 # PURPOSE: Main FastAPI application entry point, defining all API endpoints.
-from fastapi import FastAPI, Depends, HTTPException
+import io
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from pypdf import PdfReader
 from auth import verify_supabase_token
 import schemas
 from database import supabase
@@ -86,3 +88,31 @@ def get_student_matches(student_id: str, payload=Depends(verify_supabase_token))
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ---------------------------------------------------------
+# RESUME FILE UPLOAD ENDPOINT
+# ---------------------------------------------------------
+@app.post("/api/students/{id}/analyze-resume")
+async def analyze_resume(id: str, file: UploadFile = File(...), payload: dict = Depends(verify_supabase_token)):
+    if payload.get("sub") != id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+        
+    try:
+        # 1. Read the binary PDF data sent by the frontend
+        file_bytes = await file.read()
+        
+        # 2. Use PyPDF to strip away the PDF styling and extract raw text
+        pdf = PdfReader(io.BytesIO(file_bytes))
+        raw_text = ""
+        for page in pdf.pages:
+            raw_text += page.extract_text() + "\n"
+            
+        # 3. (FUTURE STEP): You will hand `raw_text` over to the AI teammate here.
+        # 4. (FUTURE STEP): The AI returns a JSON. You save it to Supabase.
+
+        # For now, let's just prove the backend can parse it by returning a preview of the text!
+        preview = raw_text[:500] if len(raw_text) > 500 else raw_text
+        return {"message": "PDF parsed successfully!", "text_preview": preview}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse PDF: {str(e)}")
