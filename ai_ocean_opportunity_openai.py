@@ -65,7 +65,7 @@ def get_openai_client() -> Any:
     if _openai_client is not None:
         return _openai_client
 
-    resolve_openai_api_key()
+    api_key = resolve_openai_api_key()
 
     try:
         from openai import OpenAI
@@ -75,7 +75,7 @@ def get_openai_client() -> Any:
             "before using the AI Ocean Opportunity helper."
         ) from exc
 
-    _openai_client = OpenAI(api_key=resolve_openai_api_key())
+    _openai_client = OpenAI(api_key=api_key)
     return _openai_client
 
 
@@ -187,19 +187,10 @@ def _raise_for_response_issues(response: Any) -> None:
 
 def _extract_refusal(response: Any) -> str | None:
     for output_item in getattr(response, "output", []) or []:
-        content_items = getattr(output_item, "content", None)
-        if content_items is None and isinstance(output_item, dict):
-            content_items = output_item.get("content", [])
-
-        for content_item in content_items or []:
-            item_type = getattr(content_item, "type", None)
-            if item_type is None and isinstance(content_item, dict):
-                item_type = content_item.get("type")
-
+        for content_item in _get_content_items(output_item):
+            item_type = _get_attr_or_key(content_item, "type")
             if item_type == "refusal":
-                refusal = getattr(content_item, "refusal", None)
-                if refusal is None and isinstance(content_item, dict):
-                    refusal = content_item.get("refusal")
+                refusal = _get_attr_or_key(content_item, "refusal")
                 return refusal or "Request refused."
     return None
 
@@ -225,21 +216,26 @@ def _parse_json_output(response: Any) -> dict[str, Any]:
 
 def _extract_output_text(response: Any) -> str | None:
     for output_item in getattr(response, "output", []) or []:
-        content_items = getattr(output_item, "content", None)
-        if content_items is None and isinstance(output_item, dict):
-            content_items = output_item.get("content", [])
-
-        for content_item in content_items or []:
-            item_type = getattr(content_item, "type", None)
-            if item_type is None and isinstance(content_item, dict):
-                item_type = content_item.get("type")
-
+        for content_item in _get_content_items(output_item):
+            item_type = _get_attr_or_key(content_item, "type")
             if item_type == "output_text":
-                text = getattr(content_item, "text", None)
-                if text is None and isinstance(content_item, dict):
-                    text = content_item.get("text")
+                text = _get_attr_or_key(content_item, "text")
                 return text
     return None
+
+
+def _get_content_items(output_item: Any) -> list[Any]:
+    content_items = _get_attr_or_key(output_item, "content")
+    if content_items is None:
+        return []
+    return list(content_items)
+
+
+def _get_attr_or_key(item: Any, key: str) -> Any:
+    value = getattr(item, key, None)
+    if value is None and isinstance(item, dict):
+        return item.get(key)
+    return value
 
 
 def _validate_with_model(

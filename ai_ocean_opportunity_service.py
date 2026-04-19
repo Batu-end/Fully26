@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from ai_ocean_opportunity_openai import (
     OceanOpportunityOpenAIError,
@@ -21,6 +22,32 @@ from ai_ocean_opportunity_schemas import (
 )
 
 
+SchemaResultT = TypeVar("SchemaResultT")
+
+
+def _call_model_with_fallback(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    output_model: type[SchemaResultT],
+    fallback_factory: Callable[[], SchemaResultT],
+    postprocess: Callable[[SchemaResultT], SchemaResultT] | None = None,
+) -> SchemaResultT:
+    try:
+        model_output = call_openai_json(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            output_model=output_model,
+        )
+        if postprocess is not None:
+            return postprocess(model_output)
+        return model_output
+    except OceanOpportunityOpenAIError:
+        return fallback_factory()
+    except Exception:
+        return fallback_factory()
+
+
 def parse_profile(
     resume_text: str | None = None,
     form_data: dict[str, Any] | None = None,
@@ -31,32 +58,22 @@ def parse_profile(
 
     cleaned_resume = (resume_text or "").strip()
     normalized_form_data = form_data or {}
-
-    try:
-        extracted_profile = call_openai_json(
-            system_prompt=_build_parse_profile_system_prompt(),
-            user_prompt=_build_parse_profile_user_prompt(
-                resume_text=cleaned_resume,
-                form_data=normalized_form_data,
-                source_type=source_type,
-                source_label=source_label,
-            ),
-            output_model=StudentProfile,
-        )
-    except OceanOpportunityOpenAIError:
-        extracted_profile = _build_profile_fallback(
+    extracted_profile = _call_model_with_fallback(
+        system_prompt=_build_parse_profile_system_prompt(),
+        user_prompt=_build_parse_profile_user_prompt(
             resume_text=cleaned_resume,
             form_data=normalized_form_data,
             source_type=source_type,
             source_label=source_label,
-        )
-    except Exception:
-        extracted_profile = _build_profile_fallback(
+        ),
+        output_model=StudentProfile,
+        fallback_factory=lambda: _build_profile_fallback(
             resume_text=cleaned_resume,
             form_data=normalized_form_data,
             source_type=source_type,
             source_label=source_label,
-        )
+        ),
+    )
 
     return _merge_profile_with_form_data(
         profile=extracted_profile,
@@ -75,29 +92,20 @@ def extract_opportunity(
     """Extract structured opportunity intelligence from raw opportunity text."""
 
     cleaned_text = raw_text.strip()
-
-    try:
-        return call_openai_json(
-            system_prompt=_build_extract_opportunity_system_prompt(),
-            user_prompt=_build_extract_opportunity_user_prompt(
-                raw_text=cleaned_text,
-                source_type=source_type,
-                source_label=source_label,
-            ),
-            output_model=OpportunityIntelligence,
-        )
-    except OceanOpportunityOpenAIError:
-        return _build_opportunity_fallback(
+    return _call_model_with_fallback(
+        system_prompt=_build_extract_opportunity_system_prompt(),
+        user_prompt=_build_extract_opportunity_user_prompt(
             raw_text=cleaned_text,
             source_type=source_type,
             source_label=source_label,
-        )
-    except Exception:
-        return _build_opportunity_fallback(
+        ),
+        output_model=OpportunityIntelligence,
+        fallback_factory=lambda: _build_opportunity_fallback(
             raw_text=cleaned_text,
             source_type=source_type,
             source_label=source_label,
-        )
+        ),
+    )
 
 
 def analyze_fit(
@@ -119,14 +127,14 @@ def analyze_fit(
                 f"requirements for '{opportunity.title}'."
             ),
         )
-
-    try:
-        model_fit = call_openai_json(
-            system_prompt=_build_fit_analysis_system_prompt(),
-            user_prompt=_build_fit_analysis_user_prompt(student_profile, opportunity),
-            output_model=FitAnalysis,
-        )
-        return FitAnalysis(
+    return _call_model_with_fallback(
+        system_prompt=_build_fit_analysis_system_prompt(),
+        user_prompt=_build_fit_analysis_user_prompt(student_profile, opportunity),
+        output_model=FitAnalysis,
+        fallback_factory=lambda: _build_fit_analysis_fallback(
+            student_profile, opportunity
+        ),
+        postprocess=lambda model_fit: FitAnalysis(
             eligible=True,
             hard_filter_failures=[],
             fit_signals=_dedupe_keep_order(model_fit.fit_signals)[:5],
@@ -136,11 +144,8 @@ def analyze_fit(
                 0.0, min(1.0, model_fit.narrative_alignment_score)
             ),
             reasoning=model_fit.reasoning,
-        )
-    except OceanOpportunityOpenAIError:
-        return _build_fit_analysis_fallback(student_profile, opportunity)
-    except Exception:
-        return _build_fit_analysis_fallback(student_profile, opportunity)
+        ),
+    )
 
 
 def generate_positioning(
@@ -156,34 +161,25 @@ def generate_positioning(
             opportunity=opportunity,
             fit_analysis=fit_analysis,
         )
-
-    try:
-        model_positioning = call_openai_json(
-            system_prompt=_build_positioning_system_prompt(),
-            user_prompt=_build_positioning_user_prompt(
-                student_profile, opportunity, fit_analysis
-            ),
-            output_model=Positioning,
-        )
-        return Positioning(
+    return _call_model_with_fallback(
+        system_prompt=_build_positioning_system_prompt(),
+        user_prompt=_build_positioning_user_prompt(
+            student_profile, opportunity, fit_analysis
+        ),
+        output_model=Positioning,
+        fallback_factory=lambda: _build_positioning_fallback(
+            student_profile=student_profile,
+            opportunity=opportunity,
+            fit_analysis=fit_analysis,
+        ),
+        postprocess=lambda model_positioning: Positioning(
             best_angle=model_positioning.best_angle.strip(),
             why_this_angle=model_positioning.why_this_angle.strip(),
             evidence_to_use=_dedupe_keep_order(model_positioning.evidence_to_use)[:5],
             things_to_avoid=_dedupe_keep_order(model_positioning.things_to_avoid)[:5],
             missing_story_piece=model_positioning.missing_story_piece.strip(),
-        )
-    except OceanOpportunityOpenAIError:
-        return _build_positioning_fallback(
-            student_profile=student_profile,
-            opportunity=opportunity,
-            fit_analysis=fit_analysis,
-        )
-    except Exception:
-        return _build_positioning_fallback(
-            student_profile=student_profile,
-            opportunity=opportunity,
-            fit_analysis=fit_analysis,
-        )
+        ),
+    )
 
 
 def generate_draft(
@@ -196,41 +192,35 @@ def generate_draft(
     """Generate an editable first draft grounded in canonical AI inputs."""
 
     selected_prompt = essay_prompt or application_prompt
+    return _call_model_with_fallback(
+        system_prompt=_build_draft_system_prompt(),
+        user_prompt=_build_draft_user_prompt(
+            student_profile=student_profile,
+            opportunity=opportunity,
+            positioning=positioning,
+            essay_prompt=essay_prompt,
+            application_prompt=application_prompt,
+        ),
+        output_model=Draft,
+        fallback_factory=lambda: _build_draft_fallback(
+            student_profile=student_profile,
+            opportunity=opportunity,
+            positioning=positioning,
+            selected_prompt=selected_prompt,
+        ),
+        postprocess=lambda model_draft: _postprocess_model_draft(model_draft),
+    )
 
-    try:
-        model_draft = call_openai_json(
-            system_prompt=_build_draft_system_prompt(),
-            user_prompt=_build_draft_user_prompt(
-                student_profile=student_profile,
-                opportunity=opportunity,
-                positioning=positioning,
-                essay_prompt=essay_prompt,
-                application_prompt=application_prompt,
-            ),
-            output_model=Draft,
-        )
-        if not model_draft.draft_answer.strip():
-            raise ValueError("Model draft answer was empty.")
-        return Draft(
-            autofilled_fields=_normalize_draft_fields(model_draft.autofilled_fields),
-            draft_answer=model_draft.draft_answer.strip(),
-            draft_outline=_dedupe_keep_order(model_draft.draft_outline)[:6],
-            user_edit_required=_dedupe_keep_order(model_draft.user_edit_required)[:6],
-        )
-    except OceanOpportunityOpenAIError:
-        return _build_draft_fallback(
-            student_profile=student_profile,
-            opportunity=opportunity,
-            positioning=positioning,
-            selected_prompt=selected_prompt,
-        )
-    except Exception:
-        return _build_draft_fallback(
-            student_profile=student_profile,
-            opportunity=opportunity,
-            positioning=positioning,
-            selected_prompt=selected_prompt,
-        )
+
+def _postprocess_model_draft(model_draft: Draft) -> Draft:
+    if not model_draft.draft_answer.strip():
+        raise ValueError("Model draft answer was empty.")
+    return Draft(
+        autofilled_fields=_normalize_draft_fields(model_draft.autofilled_fields),
+        draft_answer=model_draft.draft_answer.strip(),
+        draft_outline=_dedupe_keep_order(model_draft.draft_outline)[:6],
+        user_edit_required=_dedupe_keep_order(model_draft.user_edit_required)[:6],
+    )
 
 
 def _build_fit_analysis_system_prompt() -> str:
