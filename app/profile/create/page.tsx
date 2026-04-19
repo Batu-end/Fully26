@@ -6,17 +6,9 @@ import { createClient } from '@/lib/supabase/client';
 
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 import { Upload, FileText, X, Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 export default function CreateProfilePage() {
   const router = useRouter();
@@ -29,23 +21,19 @@ export default function CreateProfilePage() {
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     setIsDragging(true);
   }, []);
 
   const onDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     setIsDragging(false);
   }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     setIsDragging(false);
 
     const droppedFile = e.dataTransfer.files[0];
-
     if (!droppedFile) return;
 
     if (droppedFile.type !== 'application/pdf') {
@@ -80,9 +68,7 @@ export default function CreateProfilePage() {
     setError(null);
   }, []);
 
-  const removeFile = useCallback(() => {
-    setFile(null);
-  }, []);
+  const removeFile = useCallback(() => setFile(null), []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,7 +82,6 @@ export default function CreateProfilePage() {
     setError(null);
 
     try {
-      // Get user + session
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -109,14 +94,12 @@ export default function CreateProfilePage() {
         throw new Error('You must be signed in.');
       }
 
-      // Prepare upload
       const formData = new FormData();
       formData.append('file', file);
 
       const backendUrl =
         process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
-      // Send request 
       const response = await fetch(
         `${backendUrl}/api/students/${user.id}/analyze-resume`,
         {
@@ -128,32 +111,15 @@ export default function CreateProfilePage() {
         },
       );
 
-      
       if (!response.ok) {
-        const text = await response.text();
-        console.error('Backend error:', text);
-        let message = 'Failed to upload resume.';
-        try {
-          const parsed = JSON.parse(text) as { detail?: string };
-          if (typeof parsed.detail === 'string') {
-            message = parsed.detail;
-          }
-        } catch {
-          /* not JSON */
-        }
-        throw new Error(message);
+        throw new Error('Upload failed.');
       }
 
-      // 2. If it successfully bypassed the error block above, parse the JSON!
-      const result = await response.json();
-      console.log("Here is the parsed text:", result.text_preview);
-      
+      await response.json();
 
-      // Success → go to dashboard
       router.push('/dashboard');
-      router.refresh(); 
+      router.refresh();
     } catch (err) {
-      console.error('Submission error:', err);
       setError('Something went wrong.');
     } finally {
       setIsLoading(false);
@@ -161,109 +127,115 @@ export default function CreateProfilePage() {
   };
 
   return (
-    <div className='container max-w-2xl py-10'>
-      <Card>
-        <CardHeader>
-          <CardTitle className='text-2xl'>Create Your Profile</CardTitle>
-          <CardDescription>
-            Upload your resume to generate your student profile.
-          </CardDescription>
-        </CardHeader>
+    <div className='min-h-screen w-full bg-gradient-to-b from-slate-950 via-blue-950 to-slate-900 text-white flex items-center justify-center px-4'>
+      {/* glow */}
+      <div className='absolute w-[500px] h-[500px] bg-cyan-400/10 blur-[140px] rounded-full -z-10' />
 
-        <form onSubmit={handleSubmit}>
-          <CardContent className='space-y-6'>
-            <div className='space-y-2'>
-              <Label>Resume (PDF)</Label>
+      <div className='w-full max-w-2xl'>
+        {/* HEADER */}
+        <div className='text-center mb-10'>
+          <h1 className='text-4xl font-bold'>
+            Enter the Ocean Intelligence System 🌊
+          </h1>
 
-              <div
-                onDragOver={onDragOver}
-                onDragLeave={onDragLeave}
-                onDrop={onDrop}
-                className={cn(
-                  'relative border-2 border-dashed rounded-lg p-8 transition-colors flex flex-col items-center justify-center gap-4 cursor-pointer',
-                  isDragging
-                    ? 'border-primary bg-primary/5'
-                    : 'border-muted-foreground/25 hover:border-primary/50',
-                  file ? 'bg-muted/50' : 'bg-transparent',
-                )}
-                onClick={() =>
-                  !file && document.getElementById('resume-upload')?.click()
-                }
-              >
-                <input
-                  id='resume-upload'
-                  type='file'
-                  accept='.pdf'
-                  className='hidden'
-                  onChange={onFileChange}
-                />
+          <p className='text-blue-100/60 mt-3'>
+            Upload your resume and we’ll build your AI-powered ocean profile.
+          </p>
+        </div>
 
-                {file ? (
-                  <div className='flex items-center gap-3 w-full max-w-xs p-3 bg-background rounded-md border shadow-sm'>
-                    <FileText className='h-8 w-8 text-blue-500 shrink-0' />
-                    <div className='flex-1 min-w-0'>
-                      <p className='text-sm font-medium truncate'>
-                        {file.name}
-                      </p>
-                      <p className='text-xs text-muted-foreground'>
-                        {(file.size / 1024).toFixed(1)} KB
-                      </p>
-                    </div>
+        {/* CARD */}
+        <form
+          onSubmit={handleSubmit}
+          className='rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-6 flex flex-col gap-6'
+        >
+          <div>
+            <Label className='text-white/80'>Resume (PDF)</Label>
 
-                    <Button
-                      type='button'
-                      variant='ghost'
-                      size='icon'
-                      className='h-8 w-8'
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeFile();
-                      }}
-                    >
-                      <X className='h-4 w-4' />
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className='p-3 rounded-full bg-muted'>
-                      <Upload className='h-6 w-6 text-muted-foreground' />
-                    </div>
-                    <div className='text-center'>
-                      <p className='text-sm font-medium'>
-                        Click or drag & drop to upload
-                      </p>
-                      <p className='text-xs text-muted-foreground'>
-                        PDF only (max 10MB)
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {error && (
-              <p className='text-sm text-destructive font-medium'>{error}</p>
-            )}
-          </CardContent>
-
-          <CardFooter>
-            <Button
-              type='submit'
-              className='w-full'
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-                  Uploading...
-                </>
-              ) : (
-                'Create Profile'
+            {/* DROPZONE */}
+            <div
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+              onClick={() =>
+                !file && document.getElementById('resume-upload')?.click()
+              }
+              className={cn(
+                'mt-3 border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer transition',
+                isDragging
+                  ? 'border-cyan-400 bg-cyan-400/10'
+                  : 'border-white/15 hover:border-cyan-400/40',
+                file && 'bg-white/5',
               )}
-            </Button>
-          </CardFooter>
+            >
+              <input
+                id='resume-upload'
+                type='file'
+                accept='.pdf'
+                className='hidden'
+                onChange={onFileChange}
+              />
+
+              {file ? (
+                <div className='flex items-center gap-3 w-full max-w-sm'>
+                  <FileText className='text-cyan-300' />
+
+                  <div className='flex-1'>
+                    <p className='text-sm font-medium truncate'>{file.name}</p>
+                    <p className='text-xs text-blue-100/50'>
+                      {(file.size / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFile();
+                    }}
+                  >
+                    <X className='h-4 w-4' />
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Upload className='text-cyan-300' />
+                  <p className='text-sm text-blue-100/70 text-center'>
+                    Click or drag & drop your resume
+                  </p>
+                  <p className='text-xs text-blue-100/40'>
+                    PDF only • Max 10MB
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+
+          {error && <p className='text-sm text-red-400'>{error}</p>}
+
+          {/* CTA */}
+          <Button
+            type='submit'
+            disabled={isLoading}
+            className='w-full bg-cyan-400 hover:bg-cyan-300 text-slate-900 font-semibold'
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                Analyzing Resume...
+              </>
+            ) : (
+              'Generate My Ocean Profile'
+            )}
+          </Button>
+
+          {/* micro explanation */}
+          <p className='text-xs text-blue-100/50 text-center'>
+            We extract skills, experience, and match you to ocean opportunities.
+          </p>
         </form>
-      </Card>
+      </div>
     </div>
   );
 }
