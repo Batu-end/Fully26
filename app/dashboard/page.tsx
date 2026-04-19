@@ -30,6 +30,7 @@ export default async function DashboardPage({
     .single();
 
   const pagedOpportunities = await getPagedOpportunities(page);
+  console.log('Paged Opportunities:', pagedOpportunities);
 
   const dummyItems = [
     {
@@ -120,7 +121,7 @@ export default async function DashboardPage({
 
         {/* GRID */}
         <section>
-          <DashboardGrid items={dummyItems} />
+          <DashboardGrid items={pagedOpportunities} />
         </section>
 
         {/* OPTIONAL INSIGHT PANEL */}
