@@ -41,33 +41,40 @@ def protected_route(user=Depends(verify_supabase_token)):
 
 @app.post("/api/ai/parse-profile", response_model=ParseProfileResponse)
 def handle_parse_profile(
-    request: ParseProfileRequest, user=Depends(verify_supabase_token)
+    request: ParseProfileRequest, _user=Depends(verify_supabase_token)
 ):
     return ParseProfileResponse(
         student_profile=parse_profile(
-            request.resume_text,
-            request.form_data,
-            request.source_type,
-            request.source_label,
+            resume_text=request.resume_text,
+            form_data=request.form_data,
+            source_type=request.source_type,
+            source_label=request.source_label,
         )
     )
 
 
 @app.post("/api/ai/extract-opportunity", response_model=ExtractOpportunityResponse)
 def handle_extract_opportunity(
-    request: ExtractOpportunityRequest, user=Depends(verify_supabase_token)
+    request: ExtractOpportunityRequest, _user=Depends(verify_supabase_token)
 ):
     return ExtractOpportunityResponse(
         opportunity=extract_opportunity(
-            request.raw_text, request.source_type, request.source_label
+            raw_text=request.raw_text,
+            source_type=request.source_type,
+            source_label=request.source_label,
         )
     )
 
 
 @app.post("/api/ai/analyze-fit", response_model=AnalyzeFitResponse)
-def handle_analyze_fit(request: AnalyzeFitRequest, user=Depends(verify_supabase_token)):
+def handle_analyze_fit(
+    request: AnalyzeFitRequest, _user=Depends(verify_supabase_token)
+):
     return AnalyzeFitResponse(
-        fit_analysis=analyze_fit(request.student_profile, request.opportunity)
+        fit_analysis=analyze_fit(
+            student_profile=request.student_profile,
+            opportunity=request.opportunity,
+        )
     )
 
 
@@ -75,25 +82,27 @@ def handle_analyze_fit(request: AnalyzeFitRequest, user=Depends(verify_supabase_
     "/api/ai/generate-positioning", response_model=GeneratePositioningResponse
 )
 def handle_generate_positioning(
-    request: GeneratePositioningRequest, user=Depends(verify_supabase_token)
+    request: GeneratePositioningRequest, _user=Depends(verify_supabase_token)
 ):
     return GeneratePositioningResponse(
         positioning=generate_positioning(
-            request.student_profile, request.opportunity, request.fit_analysis
+            student_profile=request.student_profile,
+            opportunity=request.opportunity,
+            fit_analysis=request.fit_analysis,
         )
     )
 
 
 @app.post("/api/ai/generate-draft", response_model=GenerateDraftResponse)
 def handle_generate_draft(
-    request: GenerateDraftRequest, user=Depends(verify_supabase_token)
+    request: GenerateDraftRequest, _user=Depends(verify_supabase_token)
 ):
     return GenerateDraftResponse(
         draft=generate_draft(
-            request.student_profile,
-            request.opportunity,
-            request.positioning,
-            request.essay_prompt,
-            request.application_prompt,
+            student_profile=request.student_profile,
+            opportunity=request.opportunity,
+            positioning=request.positioning,
+            essay_prompt=request.essay_prompt,
+            application_prompt=request.application_prompt,
         )
     )
