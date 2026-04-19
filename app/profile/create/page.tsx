@@ -128,14 +128,26 @@ export default function CreateProfilePage() {
         },
       );
 
+      
       if (!response.ok) {
         const text = await response.text();
         console.error('Backend error:', text);
-        throw new Error('Failed to upload resume.');
+        let message = 'Failed to upload resume.';
+        try {
+          const parsed = JSON.parse(text) as { detail?: string };
+          if (typeof parsed.detail === 'string') {
+            message = parsed.detail;
+          }
+        } catch {
+          /* not JSON */
+        }
+        throw new Error(message);
       }
 
+      // 2. If it successfully bypassed the error block above, parse the JSON!
       const result = await response.json();
-      console.log('AI Backend Response:', result);
+      console.log("Here is the parsed text:", result.text_preview);
+      
 
       // Success → go to dashboard
       router.push('/dashboard');
