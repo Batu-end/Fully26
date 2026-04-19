@@ -48,3 +48,19 @@ def create_student(student: schemas.StudentProfileCreate, payload=Depends(verify
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ---------------------------------------------------------
+# OPPORTUNITY ENDPOINTS
+# ---------------------------------------------------------
+@app.get("/api/opportunities", response_model=list[schemas.OpportunityResponse])
+def get_opportunities(payload=Depends(verify_supabase_token)):
+    # 1. Fetch all available opportunities from the database using our service client
+    try:
+        # We can limit or paginate here later, but for MVP we fetch all.
+        response = supabase.table("opportunities").select("*").execute()
+        
+        # 2. Return the pure JSON data. FastAPI will automatically check it against schemas.OpportunityResponse
+        return response.data
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
